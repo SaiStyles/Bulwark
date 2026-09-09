@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Bulwark stores the user's policy and a log of every destructive action
+    taken on their device. None of it may leave the phone — see
+    context/_shared/conventions.md, "Zero network code", and safety-rules.md
+    rule 5 ("local file only, never transmitted").
+
+    android:allowBackup="false" already blocks cloud backup. These rules close
+    the device-transfer path as well, so nothing is carried off the device by
+    a phone-to-phone migration either.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="file" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="file" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>
