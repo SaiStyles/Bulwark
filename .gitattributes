@@ -1,0 +1,20 @@
+# Normalise line endings so the repo is identical on every platform.
+# Bulwark expects outside contributors (device profiles are the growth lever),
+# and a Windows-checked-in gradlew breaks `./gradlew` on Linux and macOS.
+
+* text=auto eol=lf
+
+# Windows-only scripts genuinely need CRLF
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# The Gradle wrapper is a POSIX shell script. It must stay LF.
+gradlew text eol=lf
+
+# Binaries git must not touch
+*.jar    binary
+*.png    binary
+*.webp   binary
+*.keystore binary
+*.apk    binary
+*.aab    binary
