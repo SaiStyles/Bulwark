@@ -176,9 +176,13 @@ private fun SummaryCard(s: PackageCatalog.Summary) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text("${s.total} packages installed", style = MaterialTheme.typography.titleMedium)
             Text("${s.offered} you can switch off — reversible, data kept")
-            Text("${s.uninstallable} also safe to uninstall outright")
+            // Says what is KNOWN, not what is offered. Bulwark cannot
+            // uninstall yet, and a count that reads as an offer is a promise
+            // the app does not keep. "Safe" was our word too; the rating
+            // belongs to the community database, so say whose it is.
+            Text("${s.uninstallable} the database also rates removable — Bulwark cannot uninstall yet")
             Text("${s.refused} Bulwark refuses — they break your way back")
-            Text("${s.unknown} undocumented — offered, but labelled honestly")
+            Text("${s.unknown} nobody has documented — still offered, and shown as unknown")
             Text(
                 "Package data snapshot ${UadDatabase.SNAPSHOT}, from the Universal " +
                     "Debloater Alliance. Bundled, not downloaded — Bulwark makes no " +
@@ -263,16 +267,20 @@ private fun PackageRow(
             entry.options.warning?.let { Reason(it) }
 
             if (!entry.options.isRefused) {
+                // What Bulwark can actually do, kept separate from what the
+                // database merely rates. Offering "or uninstall it" for an
+                // action that does not exist is guiding someone with words
+                // the app cannot back up.
                 Reason(
-                    buildString {
-                        append("You can: switch it off")
-                        if (entry.options.canUninstall) {
-                            append(", or uninstall it. Both are reversible.")
-                        } else {
-                            append(". It is reversible.")
-                        }
-                    }
+                    "You can switch it off. It stays installed, keeps its data, " +
+                        "and you can switch it back on here."
                 )
+                if (entry.options.canUninstall) {
+                    Reason(
+                        "The database also rates this removable entirely. " +
+                            "Bulwark cannot uninstall yet."
+                    )
+                }
             }
 
             if (entry.neededByInstalled.isNotEmpty()) {
