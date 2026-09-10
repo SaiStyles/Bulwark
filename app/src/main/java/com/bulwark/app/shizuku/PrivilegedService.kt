@@ -41,6 +41,40 @@ class PrivilegedService : IPrivilegedService.Stub() {
         }
     }
 
+    /**
+     * The mandatory path for any command that CHANGES device state.
+     *
+     * No such command exists yet, and none should until spike question C in
+     * `context/layers/01-debloat.md` returns a number. This exists first, on
+     * purpose: `context/CONTEXT.md` puts "Guardrail" at step 2 of the layer
+     * workflow and "Implement" at step 3, because a guardrail written after
+     * the feature is written to accommodate it.
+     *
+     * Every future mutating method routes through here, so the never-remove
+     * list and input validation cannot be forgotten at a call site. Both
+     * checks run on the uid-2000 side of the binder, below anything that
+     * could be compromised above it.
+     *
+     * @throws IllegalArgumentException on a malformed package name.
+     * @throws SecurityException if the package is permanently protected.
+     */
+    @Suppress("unused") // Used once a mutating operation is added. Do not delete.
+    private fun runMutatingCommand(
+        packageName: String,
+        buildCommand: (String) -> List<String>,
+    ): List<String> {
+        val safe = CommandSafety.requireMutable(packageName)
+        return runCommand(buildCommand(safe))
+    }
+
+    /**
+     * Executes directly with an argument vector. **No shell.**
+     *
+     * There is deliberately no `sh -c` here: without a shell there is no
+     * metacharacter interpretation, so `;`, `&&`, backticks and `$(...)` in
+     * an argument are inert text. See `CommandSafety` for why validation
+     * still happens on top of that.
+     */
     private fun runCommand(command: List<String>): List<String> {
         val process = ProcessBuilder(command).redirectErrorStream(true).start()
         return try {

@@ -24,9 +24,17 @@ android {
 
     buildTypes {
         release {
+            // Code that is not in the APK cannot be exploited. Shrinking is a
+            // security control here, not only a size one - see
+            // context/_shared/security.md. Keep rules in proguard-rules.pro
+            // explain every exception.
             optimization {
-                enable = false
+                enable = true
             }
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
     compileOptions {

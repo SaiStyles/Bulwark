@@ -18,6 +18,13 @@ sealed interface ShizukuState {
     /** Alive, but the user has not granted us access yet. */
     data object PermissionRequired : ShizukuState
 
+    /**
+     * Shizuku is running and Bulwark is allowed to use it, but we are
+     * deliberately not holding a privileged connection right now.
+     * This is the correct resting state, not a degraded one.
+     */
+    data object Idle : ShizukuState
+
     data object Connecting : ShizukuState
 
     /** Privileged calls are available. */
@@ -69,10 +76,54 @@ class ShizukuGateway(private val appContext: Context) {
         Shizuku.removeBinderReceivedListener(binderReceived)
         Shizuku.removeBinderDeadListener(binderDead)
         Shizuku.removeRequestPermissionResultListener(permissionResult)
+        release()
+    }
+
+    /**
+     * Drops the privileged connection.
+     *
+     * `context/_shared/security.md` treats standing privilege as a hole, not a
+     * convenience: a bound uid-2000 service that outlives the screen needing
+     * it is an idle capability sitting there for anything that compromises
+     * this process to pick up. Holding it costs nothing to give up, because
+     * changes already applied persist without us
+     * (`app-architecture.md`, "Shizuku is optional at rest").
+     *
+     * Re-binding is cheap. Holding privilege is not free.
+     */
+    fun release() {
+        val bound = _state.value is ShizukuState.Connected ||
+            _state.value is ShizukuState.Connecting
+        if (!bound) return
+        try {
+            Shizuku.unbindUserService(userServiceArgs, connection, /* remove = */ true)
+        } catch (_: Throwable) {
+            // Already gone, or Shizuku died. Either way we hold nothing.
+        }
+        _state.value = if (isAlive() && hasPermission()) {
+            ShizukuState.Idle
+        } else {
+            ShizukuState.Unavailable
+        }
     }
 
     /** Re-reads live state. Cheap, and safe to call as often as you like. */
     fun refresh() {
+        if (!isAlive()) {
+            _state.value = ShizukuState.Unavailable
+            return
+        }
+        if (!hasPermission()) {
+            _state.value = ShizukuState.PermissionRequired
+            return
+        }
+        // Deliberately does NOT bind. Privilege is taken when a privileged
+        // action is requested, not merely because a screen was opened.
+        if (_state.value !is ShizukuState.Connected) _state.value = ShizukuState.Idle
+    }
+
+    /** Take privilege now, because the user asked for something that needs it. */
+    fun connect() {
         if (!isAlive()) {
             _state.value = ShizukuState.Unavailable
             return

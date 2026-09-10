@@ -74,6 +74,17 @@ fun SpikeScreen(
             is ShizukuState.PermissionRequired ->
                 Button(onClick = { gateway.requestPermission() }) { Text("Grant Bulwark access") }
 
+            is ShizukuState.Idle ->
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Bulwark is not currently holding privileged access. That is the " +
+                            "normal resting state - it takes access only when you ask for " +
+                            "something that needs it, and gives it straight back.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Button(onClick = { gateway.connect() }) { Text("Connect for this task") }
+                }
+
             is ShizukuState.Connected -> Button(
                 enabled = !running,
                 onClick = {
@@ -94,6 +105,10 @@ fun SpikeScreen(
             ) { Text(if (running) "Counting…" else "Run the probe") }
 
             else -> Unit
+        }
+
+        if (state is ShizukuState.Connected) {
+            Button(onClick = { gateway.release() }) { Text("Release access now") }
         }
 
         error?.let {
@@ -123,6 +138,7 @@ fun SpikeScreen(
 private fun describe(state: ShizukuState): String = when (state) {
     is ShizukuState.Unavailable -> "Shizuku: not running"
     is ShizukuState.PermissionRequired -> "Shizuku: running, access not granted"
+    is ShizukuState.Idle -> "Shizuku: available, not connected (resting)"
     is ShizukuState.Connecting -> "Shizuku: connecting…"
     is ShizukuState.Connected -> "Shizuku: connected as uid 2000"
     is ShizukuState.Failed -> "Shizuku: failed — ${state.reason}"
