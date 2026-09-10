@@ -52,6 +52,23 @@ object ProtectedPackages {
 
         // Core framework surfaces.
         "com.android.systemui", "android.system", "com.android.providers",
+
+        // Added 2026-09-10 after cross-referencing the Universal Debloater
+        // Alliance database against the test device. Our category list caught
+        // telephony perfectly and knew nothing about these - every one is
+        // marked Unsafe upstream, several with "bootloop" in the description.
+        //
+        // These are structural categories, not a list of specific packages.
+        // Per-package knowledge belongs in the bundled UAD data, not here;
+        // this file is only for classes of thing that are dangerous by shape.
+        "networkstack",      // network stack module
+        "modulemetadata",    // "extremely large chance of bootlooping"
+        "ext.shared",        // Android shared library
+        "ext.services",      // default text classifier and friends
+        "devicelock",        // device lock controller
+        "frameworkres",      // framework resource overlays
+        "wifi.resources",    // Wi-Fi module resources
+        "connectivity.resources",
     )
 
     /**
@@ -74,6 +91,12 @@ object ProtectedPackages {
         "com.android.packageinstaller",
         "com.google.android.permissioncontroller",
         "com.google.android.ext.services",
+        // The bare MediaTek core package - "core system services and drivers
+        // for MediaTek-powered devices". Exact match on purpose: "mediatek" as
+        // a fragment would protect every MediaTek package, including the many
+        // that are safely removable, and an over-broad rule that defeats the
+        // feature is its own kind of failure.
+        "com.mediatek",
         // Shizuku itself. Removing our own privilege source mid-operation
         // would strand the user with no way to undo what we just did.
         "moe.shizuku.privileged.api",

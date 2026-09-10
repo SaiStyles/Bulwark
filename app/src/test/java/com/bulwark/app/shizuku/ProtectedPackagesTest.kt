@@ -81,6 +81,38 @@ class ProtectedPackagesTest {
     }
 
     @Test
+    fun `protects the bootloop and framework-module cases`() {
+        // Every one of these is marked Unsafe by the Universal Debloater
+        // Alliance and was allowed by our list until 2026-09-10. Found by
+        // cross-referencing their database against the real test device -
+        // not by reading our own code.
+        listOf(
+            "com.google.android.overlay.modules.modulemetadata.forframework",
+            "com.google.android.networkstack",
+            "com.google.android.ext.shared",
+            "com.google.android.overlay.modules.ext.services",
+            "com.android.devicelockcontroller",
+            "com.mediatek.frameworkresoverlay",
+            "com.mediatek.FrameworkResOverlayExt",
+            "com.android.wifi.resources.overlay",
+            "com.google.android.connectivity.resources",
+            "com.mediatek",
+        ).forEach {
+            assertTrue("must protect $it", ProtectedPackages.isProtected(it))
+        }
+    }
+
+    @Test
+    fun `mediatek is matched exactly, not as a prefix`() {
+        // "mediatek" as a fragment would protect every MediaTek package,
+        // including the many that are safely removable. An over-broad rule
+        // that defeats the feature is its own kind of failure.
+        assertTrue(ProtectedPackages.isProtected("com.mediatek"))
+        assertFalse(ProtectedPackages.isProtected("com.mediatek.duraspeed"))
+        assertFalse(ProtectedPackages.isProtected("com.mediatek.camera"))
+    }
+
+    @Test
     fun `empty or blank input fails closed`() {
         // Cannot reason about it, so refuse. safety-rules.md rule 6.
         assertTrue(ProtectedPackages.isProtected(""))
