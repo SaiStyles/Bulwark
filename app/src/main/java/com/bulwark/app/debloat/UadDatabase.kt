@@ -55,6 +55,32 @@ enum class RemovalRating {
     }
 }
 
+/**
+ * A description with the noise removed and **nothing else**.
+ *
+ * UAD descriptions are multi-line, and the lines after the first are the ones
+ * that say what breaks:
+ *
+ *     Private Compute Services. On-device behavior analysis
+ *     Enables live caption, music recognition and smart replies.
+ *     Seems to be a dependency of System Intelligence.
+ *     https://play.google.com/...
+ *
+ * Bulwark used to show only line one, under a green badge. That hid exactly
+ * the part a person needs - and SAI caught it by knowing the package better
+ * than the summary did. Showing the first line of a description that says
+ * "dependency of System Intelligence" on line three is not a truncation, it is
+ * a misrepresentation.
+ *
+ * URLs are dropped because they are unreachable: Bulwark has no `INTERNET`
+ * permission and no browser hand-off, so a link is a dead end on screen.
+ */
+fun String.readableDescription(): String =
+    lineSequence()
+        .map { it.trim() }
+        .filter { it.isNotEmpty() && !it.startsWith("http") }
+        .joinToString(" ")
+
 /** What the community database knows about one package. */
 data class UadEntry(
     val rating: RemovalRating,

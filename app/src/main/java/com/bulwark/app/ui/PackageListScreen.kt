@@ -37,6 +37,7 @@ import com.bulwark.app.debloat.CatalogEntry
 import com.bulwark.app.debloat.PackageCatalog
 import com.bulwark.app.debloat.RemovalRating
 import com.bulwark.app.debloat.UadDatabase
+import com.bulwark.app.debloat.readableDescription
 import com.bulwark.app.shizuku.PrivilegedPackages
 import com.bulwark.app.shizuku.ShizukuState
 import kotlinx.coroutines.Dispatchers
@@ -250,8 +251,10 @@ private fun PackageRow(
                 )
             }
 
-            entry.description?.let {
-                Text(it.lineSequence().first(), style = MaterialTheme.typography.bodySmall)
+            // Every line, not the first. The lines after the first are the
+            // ones that say what breaks - see UadDatabase.readableDescription.
+            entry.description?.readableDescription()?.takeIf { it.isNotBlank() }?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall)
             }
 
             entry.options.refusal?.let {
@@ -330,7 +333,11 @@ private fun Reason(text: String) {
 private fun Badge(entry: CatalogEntry) {
     val (label, colour) = when {
         entry.options.isRefused -> "LOCKED" to Color(0xFF1565C0)
-        entry.rating == RemovalRating.RECOMMENDED -> "SAFE" to Color(0xFF2E7D32)
+        // UAD's own word, not ours. "SAFE" was Bulwark promising nothing
+        // would change; Recommended only means most people can remove it.
+        // com.google.android.as.oss is rated Recommended and is a dependency
+        // of System Intelligence - both true at once.
+        entry.rating == RemovalRating.RECOMMENDED -> "RECOMMENDED" to Color(0xFF2E7D32)
         entry.rating == RemovalRating.ADVANCED -> "CARE" to Color(0xFFE65100)
         entry.rating == RemovalRating.EXPERT -> "EXPERT" to Color(0xFF6A1B9A)
         entry.rating == RemovalRating.UNSAFE -> "RISKY" to Color(0xFFB71C1C)

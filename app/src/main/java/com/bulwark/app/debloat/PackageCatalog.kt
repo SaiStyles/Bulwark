@@ -117,7 +117,7 @@ class PackageCatalog(private val database: UadDatabase) {
                     "phone. Turning it off is reversible, but do it one at a time " +
                     "so you can tell what changed."
             rating == RemovalRating.UNSAFE ->
-                entry?.description?.lineSequence()?.firstOrNull()?.trim()
+                entry?.description?.readableDescription()?.takeIf { it.isNotBlank() }
                     ?.let { "Known to cause problems: $it" }
                     ?: "The community database marks this unsafe to remove."
             rating == RemovalRating.EXPERT ->
