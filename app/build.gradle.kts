@@ -43,7 +43,10 @@ android {
     }
     buildFeatures {
         compose = true
-        aidl = true
+        // AIDL was enabled for the Shizuku user service, which does not work
+        // on MediaTek and was deleted. No .aidl files remain, so this ran an
+        // extra compile task over nothing on every build.
+        aidl = false
     }
 }
 

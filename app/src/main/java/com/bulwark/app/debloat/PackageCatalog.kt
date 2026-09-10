@@ -81,7 +81,7 @@ class PackageCatalog(private val database: UadDatabase) {
                 packageName = name,
                 isSystem = name in systemPackages,
                 rating = entry?.rating ?: RemovalRating.UNKNOWN,
-                options = optionsFor(name, entry),
+                options = optionsFor(name, name in systemPackages, entry),
                 description = entry?.description,
                 // Only dependents that are actually present. A warning about an
                 // app the user does not have is noise, and noise gets ignored.
@@ -90,13 +90,15 @@ class PackageCatalog(private val database: UadDatabase) {
         }.sortedWith(compareBy({ !it.isOffered }, { it.packageName }))
     }
 
-    private fun optionsFor(name: String, entry: UadEntry?): Options {
-        // Hard floor first. Nothing below can raise it.
-        ProtectedPackages.reasonFor(name)?.let {
+    private fun optionsFor(name: String, isSystem: Boolean, entry: UadEntry?): Options {
+        // Hard floor first. Nothing below can raise it. [isSystem] decides
+        // whether the structural fragment list applies: it describes shapes of
+        // system component, and an app the user installed is never one.
+        ProtectedPackages.reasonFor(name, isSystem)?.let {
             return Options(canDisable = false, canUninstall = false, warning = null, refusal = it)
         }
 
-        val caution = ProtectedPackages.cautionFor(name)
+        val caution = ProtectedPackages.cautionFor(name, isSystem)
         val rating = entry?.rating ?: RemovalRating.UNKNOWN
 
         // Uninstall is the escalation: only where the package is documented and

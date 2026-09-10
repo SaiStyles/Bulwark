@@ -134,6 +134,48 @@ object PrivilegedPackages {
     }
 
     /**
+     * Whether one package is a system package, asked of the platform.
+     *
+     * This is the authoritative answer, and it exists so that
+     * [CommandSafety.requireMutable] can establish system-ness for itself
+     * instead of trusting a flag handed down from the UI. The flag decides
+     * whether [ProtectedPackages]' structural fragment list applies, so a
+     * caller able to supply it is a caller able to unlock every OEM-renamed
+     * telephony package by passing `false`.
+     *
+     * **Fails closed.** A package the platform cannot find, or a call that
+     * comes back malformed, returns `true`: unknown means protected
+     * (`safety-rules.md` rule 6). Refusing to act on a package that is not
+     * installed costs nothing.
+     *
+     * Blocking binder call. Never on the main thread.
+     */
+    fun isSystemPackage(packageName: String, userId: Int = 0): Boolean = try {
+        val binder = SystemServiceHelper.getSystemService("package")
+            ?: error("System package service is unavailable")
+        val service = invokeHidden(
+            Class.forName(PM_STUB), null, "asInterface", ShizukuBinderWrapper(binder),
+        ) ?: error("IPackageManager.Stub.asInterface returned null")
+
+        val appInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            invokeHidden(
+                Class.forName(PM_INTERFACE), service, "getApplicationInfo",
+                packageName, 0L, userId,
+            )
+        } else {
+            invokeHidden(
+                Class.forName(PM_INTERFACE), service, "getApplicationInfo",
+                packageName, 0, userId,
+            )
+        } ?: error("getApplicationInfo returned null for $packageName")
+
+        val flags = appInfo.javaClass.getField("flags").getInt(appInfo)
+        (flags and 1) != 0 || (flags and 128) != 0
+    } catch (_: Throwable) {
+        true
+    }
+
+    /**
      * Calls a non-SDK method, using the bypass only where one is needed.
      *
      * **API 28+** — `HiddenApiBypass.invoke`. The non-SDK blocklist exists and

@@ -31,6 +31,26 @@ package com.bulwark.app.shizuku
  * **Bulwark exists because Android decides for people. Copying that habit
  * while claiming to fight it would be the worst possible outcome.**
  *
+ * ## Why the fragment list needs [isSystem]
+ *
+ * Substring matching exists to catch *OEM-renamed system components*, which is
+ * a system-package problem and only that. Applied to everything it silently
+ * became the paternalism this file had just removed: `com.teslacoilsw.launcher`
+ * (Nova) matched "launcher", `com.radio.fmradio` matched "radio",
+ * `com.simplenote.android` matched "sim", `com.claims.app` matched "ims".
+ * Eight of twenty-five realistic third-party names came back LOCKED - each one
+ * an app its owner chose to install, refused with "permanent never-remove
+ * list".
+ *
+ * So the fragment list applies to **system packages only**. [PROTECTED_EXACT]
+ * stays unconditional, because exact names cannot collide and two of its
+ * entries (Shizuku, Bulwark) are user-installed by definition.
+ *
+ * This did not need new judgement to catch - the rule was already written. It
+ * needed a test that fed it names nobody had thought about. See
+ * [FRAGMENT_FALSE_FRIENDS] for the collisions that survive even inside the
+ * system partition.
+ *
  * ## Where it is enforced
  *
  * Below the UI and below the policy engine, on the uid-2000 side of the binder
@@ -143,16 +163,46 @@ object ProtectedPackages {
     )
 
     /**
+     * Substrings that look like a protected fragment but are not.
+     *
+     * These are removed from the name before fragment matching. Every one is a
+     * real collision, not a hypothetical:
+     *
+     * - **fmradio** contains "radio". FM radio apps are common preinstalled
+     *   OEM bloat and have nothing to do with the cellular radio.
+     * - **simple** contains "sim". A preinstalled `com.oem.simplenote` is not
+     *   part of the SIM stack.
+     *
+     * Substring matching has collisions; that is the price of catching OEM
+     * renames, and the honest response is to record each one as it is found
+     * rather than pretend the rule is exact.
+     */
+    private val FRAGMENT_FALSE_FRIENDS = listOf("fmradio", "simple")
+
+    /**
      * True when [packageName] must never be disabled or uninstalled.
      *
-     * Case-insensitive, because package names are compared as text here and
-     * an OEM using mixed case must not slip through.
+     * @param isSystem whether this is a system package (or an updated system
+     *   app). **Must come from a privileged query, never from UI state** - it
+     *   decides whether the fragment list applies at all. `PrivilegedPackages`
+     *   reads it from `ApplicationInfo.flags` at uid 2000.
+     *
+     * There is deliberately no default. A caller that has not established
+     * system-ness has not earned an answer, and a default of `false` would
+     * quietly unlock every OEM-renamed telephony package.
+     *
+     * Case-insensitive, because package names are compared as text here and an
+     * OEM using mixed case must not slip through.
      */
-    fun isProtected(packageName: String): Boolean {
+    fun isProtected(packageName: String, isSystem: Boolean): Boolean {
         val name = packageName.lowercase().trim()
         if (name.isEmpty()) return true // Cannot reason about it, so refuse.
         if (name in PROTECTED_EXACT) return true
-        return PROTECTED_FRAGMENTS.any { name.contains(it) }
+        // The fragment list describes shapes of *system* component, and a
+        // package the user installed themselves is never one of those.
+        if (!isSystem) return false
+        val scrubbed = FRAGMENT_FALSE_FRIENDS.fold(name) { acc, s -> acc.replace(s, "") }
+        return PROTECTED_FRAGMENTS.any { scrubbed.contains(it) }
     }
 
     /**
@@ -161,8 +211,8 @@ object ProtectedPackages {
      * Never a refusal. If this returns text, the action still happens when the
      * user chooses it - they simply get told what they are trading first.
      */
-    fun cautionFor(packageName: String): String? {
-        if (isProtected(packageName)) return null // Already refused outright.
+    fun cautionFor(packageName: String, isSystem: Boolean): String? {
+        if (isProtected(packageName, isSystem)) return null // Already refused.
         val name = packageName.lowercase()
         return when {
             listOf("sms", "mms", "messaging", "cellbroadcast").any { name.contains(it) } ->
@@ -190,8 +240,8 @@ object ProtectedPackages {
      * Why an outright refusal happened. A user told "no" deserves to be told
      * why, or they will go looking for a tool that just says yes.
      */
-    fun reasonFor(packageName: String): String? {
-        if (!isProtected(packageName)) return null
+    fun reasonFor(packageName: String, isSystem: Boolean): String? {
+        if (!isProtected(packageName, isSystem)) return null
         val name = packageName.lowercase()
         return when {
             listOf("telephony", "telecom", "ims", "carrier", "dialer", "phone",

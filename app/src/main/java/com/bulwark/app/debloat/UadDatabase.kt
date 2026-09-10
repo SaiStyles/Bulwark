@@ -11,19 +11,35 @@ enum class RemovalRating {
     /** Has consequences worth stating. Offered with a warning. */
     ADVANCED,
 
-    /** Only if you know exactly why. Behind a deliberate opt-in. */
+    /** Only if you know exactly why. Offered, warned, never uninstallable. */
     EXPERT,
 
-    /** Never offered as an option. Bootloops, broken modules, dead radios. */
+    /**
+     * Bootloops, broken modules, dead radios.
+     *
+     * Still *disableable*, with the community's own description quoted at the
+     * user, because disable is reversible with `pm enable` and keeps app data.
+     * Never uninstallable.
+     */
     UNSAFE,
 
     /**
      * Not in the database at all.
      *
-     * **Treated as not-offered, not as safe.** 57 of the test device's 274
-     * system packages land here because Lava is a small OEM. Silence is not
-     * evidence of safety, and `context/_shared/safety-rules.md` rule 1 says
-     * allowlist, never blocklist.
+     * **Offered for disable, with the gap stated plainly; never for
+     * uninstall.** 57 of the test device's 274 system packages land here
+     * because Lava is a small OEM, and they are ordinary vendor software
+     * nobody has audited rather than landmines.
+     *
+     * This used to read "treated as not-offered, not as safe", citing an
+     * earlier rule 1 of `context/_shared/safety-rules.md` that said allowlist,
+     * never blocklist. Both were replaced on 2026-09-10: the rule is now
+     * "offer, do not enforce", and withholding a *reversible* choice from
+     * someone about their own phone needs a better reason than "we were not
+     * sure". "Nobody documented this" is information to hand over.
+     *
+     * Silence is still not evidence of safety — which is why it gates
+     * uninstall, the one that is not reversible.
      */
     UNKNOWN,
     ;

@@ -82,6 +82,19 @@ class PackageCatalogTest {
     }
 
     @Test
+    fun `a user-installed app is never locked by the structural list`() {
+        // Nova Launcher matches the "launcher" fragment, which exists to catch
+        // OEM-renamed *system* launchers. Applied to an app someone installed
+        // themselves it produced "on Bulwark's permanent never-remove list"
+        // for a third-party app - the paternalism this project removed on
+        // 2026-09-10, arriving back through the matching rule.
+        val name = "com.teslacoilsw.launcher"
+        val r = catalog().build(listOf(name), systemPackages = emptySet()).single()
+        assertFalse("must not be refused", r.options.isRefused)
+        assertTrue("must be offerable", r.options.canDisable)
+    }
+
+    @Test
     fun `dependency warnings only mention apps that are actually installed`() {
         // A warning about an app the user does not have is noise, and noise
         // trains people to dismiss warnings that matter.

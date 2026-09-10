@@ -25,6 +25,11 @@ class MainActivity : ComponentActivity() {
         StrictModePolicy.installIfDebuggable(this)
         // Before anything is drawn, and before any touch can land.
         WindowHardening.apply(this)
+        // security.md FIXED-11's second layer. It was written and never
+        // called, which left the file describing a live control that was not
+        // running - the state that file itself calls the worst possible one
+        // for a security control. Authentication is still the real defence.
+        WindowHardening.hideFromAutomation(this)
         enableEdgeToEdge()
         gateway = ShizukuGateway(applicationContext)
 

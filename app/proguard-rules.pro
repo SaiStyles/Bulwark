@@ -26,17 +26,22 @@
 # Our privileged boundary
 # ---------------------------------------------------------------------------
 
-# CRITICAL. ShizukuGateway hands Shizuku this class as a STRING:
-#   ComponentName(packageName, PrivilegedService::class.java.name)
-# Shizuku then loads it by that name inside a separate uid-2000 process. R8
-# has no way to know the string and the class are related, so without this the
-# release build compiles cleanly and then fails at runtime, on a user's phone,
-# at the exact moment they try to use a privileged feature.
--keep class com.bulwark.app.shizuku.PrivilegedService { *; }
-
-# AIDL-generated stubs and proxies are instantiated by the binder machinery.
--keep class com.bulwark.app.shizuku.IPrivilegedService { *; }
--keep class com.bulwark.app.shizuku.IPrivilegedService$* { *; }
+# There is deliberately nothing kept here any more.
+#
+# There used to be three keeps: PrivilegedService, IPrivilegedService and its
+# generated stubs. Shizuku loaded PrivilegedService BY NAME in a separate
+# uid-2000 process, which R8 cannot see, so the release build would have
+# compiled cleanly and failed on a user's phone.
+#
+# That whole path was deleted on 2026-09-10: Shizuku user services do not work
+# on MediaTek (NPE in LoadedApk.makeApplicationInner), and MediaTek is this
+# project's target. ShizukuBinderWrapper needs no separate process and no
+# class loaded by name, so nothing crosses a boundary R8 cannot follow.
+#
+# The keeps outlived the classes by one commit. A keep rule for a class that
+# does not exist is not harmless: it is a claim, in the file an auditor reads,
+# that a boundary is being defended when there is no longer a boundary there.
+# If a by-name load is ever reintroduced, the keep comes back with it.
 
 # ---------------------------------------------------------------------------
 # Safety-critical logic
