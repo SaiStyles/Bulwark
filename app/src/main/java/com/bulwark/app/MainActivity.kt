@@ -7,41 +7,53 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
+import com.bulwark.app.shizuku.ShizukuGateway
+import com.bulwark.app.ui.SpikeScreen
 import com.bulwark.app.ui.theme.BulwarkTheme
 
 class MainActivity : ComponentActivity() {
+
+    private lateinit var gateway: ShizukuGateway
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        gateway = ShizukuGateway(applicationContext)
+
         setContent {
             BulwarkTheme {
+                val state by gateway.state.collectAsState()
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Greeting(
-                        name = "Android",
-                        modifier = Modifier.padding(innerPadding)
+                    SpikeScreen(
+                        state = state,
+                        gateway = gateway,
+                        modifier = Modifier.padding(innerPadding),
                     )
                 }
             }
         }
     }
-}
 
-@Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-    Text(
-        text = "Hello $name!",
-        modifier = modifier
-    )
-}
+    override fun onStart() {
+        super.onStart()
+        gateway.start()
+    }
 
-@Preview(showBackground = true)
-@Composable
-fun GreetingPreview() {
-    BulwarkTheme {
-        Greeting("Android")
+    /**
+     * Shizuku is commonly started *while Bulwark is in the background* — the
+     * user leaves, starts it, comes back. Re-reading here rather than trusting
+     * the state from launch is what makes that flow work.
+     */
+    override fun onResume() {
+        super.onResume()
+        gateway.refresh()
+    }
+
+    override fun onStop() {
+        gateway.stop()
+        super.onStop()
     }
 }
