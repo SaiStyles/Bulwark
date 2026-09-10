@@ -7,6 +7,7 @@ import android.hardware.biometrics.BiometricManager.Authenticators
 import android.hardware.biometrics.BiometricPrompt
 import android.os.Build
 import android.os.CancellationSignal
+import androidx.annotation.RequiresApi
 
 /**
  * Requires a human to authenticate before anything destructive runs.
@@ -48,8 +49,26 @@ object DestructiveActionGuard {
     sealed interface Result {
         data object Authenticated : Result
         data object Failed : Result
-        /** No PIN, pattern, password or biometric is configured on the device. */
+
+        /**
+         * No PIN, pattern, password or biometric is configured.
+         *
+         * There is nothing to authenticate against, so there is no defence to
+         * offer. The caller must refuse the destructive action and explain
+         * why, rather than proceeding unprotected.
+         */
         data object NoDeviceSecurity : Result
+
+        /**
+         * This Android version cannot show the prompt in-process.
+         *
+         * `BiometricPrompt` gained device-credential support only at API 29,
+         * and minSdk is 26. On 26-28 the caller must launch
+         * [deviceCredentialIntent] with `startActivityForResult`. The keyguard
+         * still runs in the system process, so the anti-automation property
+         * holds; only the plumbing differs.
+         */
+        data object UseCredentialIntent : Result
     }
 
     /**
@@ -77,14 +96,16 @@ object DestructiveActionGuard {
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ->
                 promptModern(activity, title, reason, onResult)
 
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.P ->
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ->
                 promptLegacy(activity, title, reason, onResult)
 
             else ->
-                // API 26-27 has no BiometricPrompt. The keyguard confirmation
-                // Intent is still outside our process, which is the property
-                // that matters. The caller handles the activity result.
-                onResult(Result.NoDeviceSecurity)
+                // API 26-28. BiometricPrompt exists from 28 but cannot accept a
+                // device credential until 29, and biometric-only would lock out
+                // phones with no sensor - which is much of our target hardware.
+                // The keyguard Intent covers all three versions and keeps the
+                // property that matters: the prompt is not in our process.
+                onResult(Result.UseCredentialIntent)
         }
     }
 
@@ -95,14 +116,19 @@ object DestructiveActionGuard {
     }
 
     /**
-     * Fallback for API 26-27: an Intent the caller starts for result. The
+     * Fallback for API 26-28: an Intent the caller starts for result. The
      * keyguard runs in the system process, so Accessibility cannot drive it.
+     *
+     * Returned via [Result.UseCredentialIntent]. Do not skip it on old
+     * Android - that would silently drop the anti-automation guarantee on
+     * exactly the devices least likely to be otherwise protected.
      */
     @Suppress("DEPRECATION")
     fun deviceCredentialIntent(context: Context, title: String, description: String) =
         (context.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager)
             ?.createConfirmDeviceCredentialIntent(title, description)
 
+    @RequiresApi(Build.VERSION_CODES.R)
     private fun promptModern(
         activity: Activity,
         title: String,
@@ -129,6 +155,7 @@ object DestructiveActionGuard {
     }
 
     @Suppress("DEPRECATION")
+    @RequiresApi(Build.VERSION_CODES.Q)
     private fun promptLegacy(
         activity: Activity,
         title: String,
@@ -148,6 +175,7 @@ object DestructiveActionGuard {
         )
     }
 
+    @RequiresApi(Build.VERSION_CODES.Q)
     private fun callbackFor(onResult: (Result) -> Unit) =
         object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(
