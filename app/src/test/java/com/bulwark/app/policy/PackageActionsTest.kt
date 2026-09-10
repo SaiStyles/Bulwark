@@ -170,6 +170,57 @@ class PackageActionsTest {
     }
 
     @Test
+    fun `switchBackOn twice does not re-disable`() {
+        // The bug hardware testing found on 2026-09-10. "Undo" undid the
+        // previous undo, so a second press performed a DISABLE under a label
+        // promising the opposite. switchBackOn asks for the state it wants
+        // rather than for one step back, so pressing it again is a no-op in
+        // effect rather than a reversal.
+        val state = FakeState(mapOf("com.oem.bloat" to PackageState.ENABLED))
+        val (act, _) = actions(state)
+
+        act.disable("com.oem.bloat")
+        act.switchBackOn("com.oem.bloat")
+        assertEquals(PackageState.ENABLED, state.states["com.oem.bloat"])
+
+        act.switchBackOn("com.oem.bloat")
+        assertEquals(
+            "a second press must not switch it off again",
+            PackageState.ENABLED, state.states["com.oem.bloat"],
+        )
+    }
+
+    @Test
+    fun `switchBackOn restores the recorded state, not ENABLED`() {
+        // pm enable sets ENABLED (1). A package that shipped at DEFAULT (0)
+        // must come back to 0, or Bulwark has made a change of its own while
+        // claiming to undo one. This is the exact case seen on the test
+        // device, where com.android.egg sat at DEFAULT.
+        val state = FakeState(mapOf("com.oem.bloat" to PackageState.DEFAULT))
+        val (act, _) = actions(state)
+
+        act.disable("com.oem.bloat")
+        act.switchBackOn("com.oem.bloat")
+
+        assertEquals(
+            "must restore DEFAULT, not ENABLED",
+            PackageState.DEFAULT, state.states["com.oem.bloat"],
+        )
+    }
+
+    @Test
+    fun `switchBackOn with no recorded disable falls back to the system default`() {
+        // Never ENABLED: switching on something the vendor shipped off would
+        // be Bulwark deciding for the user.
+        val state = FakeState(mapOf("com.oem.bloat" to PackageState.DISABLED_USER))
+        val (act, _) = actions(state)
+
+        act.switchBackOn("com.oem.bloat")
+
+        assertEquals(PackageState.DEFAULT, state.states["com.oem.bloat"])
+    }
+
+    @Test
     fun `undo with nothing to undo says so rather than throwing`() {
         val (act, _) = actions(FakeState())
         assertFalse(act.undoLast("com.never.touched"))

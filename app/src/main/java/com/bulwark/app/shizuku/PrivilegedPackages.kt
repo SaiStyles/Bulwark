@@ -74,7 +74,19 @@ object PrivilegedPackages {
     }
 
     /** One installed package, with the little we need to classify it. */
-    data class Installed(val packageName: String, val isSystem: Boolean)
+    data class Installed(
+        val packageName: String,
+        val isSystem: Boolean,
+        /**
+         * Whether the package is currently switched on.
+         *
+         * Read so the UI can offer *one honest action* - "switch off" or
+         * "switch back on" - rather than a blind "undo". Hardware testing on
+         * 2026-09-10 showed why that matters: an Undo button that undoes the
+         * previous undo performs a **disable** under a non-destructive label.
+         */
+        val isEnabled: Boolean,
+    )
 
     /**
      * Like [list], but also reports whether each package is a system package.
@@ -98,7 +110,12 @@ object PrivilegedPackages {
             // system app, and treating it as user-installed would quietly
             // widen what we offer to remove.
             val isSystem = (flags and 1) != 0 || (flags and 128) != 0
-            Installed(name, isSystem)
+            // ApplicationInfo.enabled is public SDK and already in hand from
+            // the privileged enumeration, so this costs no extra binder call.
+            val isEnabled = appInfo?.let {
+                it.javaClass.getField("enabled").getBoolean(it)
+            } ?: true
+            Installed(name, isSystem, isEnabled)
         }
     }
 

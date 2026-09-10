@@ -120,6 +120,33 @@ class PackageActions(
     }
 
     /**
+     * Switches [packageName] back on, to the state Bulwark found it in.
+     *
+     * This is what the UI calls, **not** [undoLast]. Hardware testing on
+     * 2026-09-10 found the difference the hard way: an "Undo" button that
+     * undoes the most recent change will, on a second press, undo the *undo* -
+     * performing a disable under a non-destructive label. The log recorded it
+     * faithfully, which is how it was caught.
+     *
+     * So the UI asks for the state it wants rather than for "one step back",
+     * and this looks up the state to restore instead of assuming `ENABLED`.
+     * Falls back to the system default when Bulwark has no record of
+     * disabling it - `pm enable` sets `ENABLED` (1), which for a package that
+     * shipped at `DEFAULT` (0) is a change of its own.
+     */
+    fun switchBackOn(packageName: String, userId: Int = 0) =
+        enable(packageName, stateBeforeLastDisable(packageName), userId)
+
+    /** The state recorded by the most recent *successful* disable, if any. */
+    private fun stateBeforeLastDisable(packageName: String): Int? {
+        val history = journal.history().filter { it.packageName == packageName }
+        val closed = history.filter { it.phase == Phase.SUCCEEDED }.mapNotNull { it.attemptId }.toSet()
+        return history.lastOrNull {
+            it.kind == ActionKind.DISABLE && it.phase == Phase.ATTEMPTED && it.id in closed
+        }?.previousState
+    }
+
+    /**
      * Undoes the most recent successful change to [packageName].
      *
      * Reads the plan from the log rather than from anything the UI is holding,

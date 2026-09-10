@@ -89,18 +89,26 @@ class ActionRunner(
         "Switched off $label. You can undo this."
     }
 
-    /** Authenticates, then puts [packageName] back to what it was. */
-    fun undo(
+    /**
+     * Authenticates, then switches [packageName] back on.
+     *
+     * Deliberately not "undo". A row offers the one action that matches its
+     * current state, so the label always says what the button does - see
+     * `PackageActions.switchBackOn` for what hardware testing taught about
+     * the difference.
+     */
+    fun switchBackOn(
         packageName: String,
         label: String,
         onOutcome: (Outcome) -> Unit,
     ) = authenticated(
-        title = "Undo change to $label",
-        reason = "Put $packageName back the way it was before Bulwark " +
-            "changed it.",
+        title = "Switch $label back on",
+        reason = "Switch $packageName back on, to the state it was in before " +
+            "Bulwark changed it.",
         onOutcome = onOutcome,
     ) {
-        if (actions.undoLast(packageName)) "Put $label back." else "Nothing to undo."
+        actions.switchBackOn(packageName)
+        "Switched $label back on."
     }
 
     /**

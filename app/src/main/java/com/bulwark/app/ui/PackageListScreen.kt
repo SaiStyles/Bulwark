@@ -93,6 +93,7 @@ fun PackageListScreen(
                 val list = catalog.build(
                     installed.map { it.packageName },
                     installed.filter { it.isSystem }.map { it.packageName }.toSet(),
+                    installed.filterNot { it.isEnabled }.map { it.packageName }.toSet(),
                 )
                 list to catalog.summarise(list)
             }
@@ -262,8 +263,11 @@ private fun PackageRow(
                 Reason(
                     buildString {
                         append("You can: switch it off")
-                        if (entry.options.canUninstall) append(", or uninstall it")
-                        append(". Both are reversible.")
+                        if (entry.options.canUninstall) {
+                            append(", or uninstall it. Both are reversible.")
+                        } else {
+                            append(". It is reversible.")
+                        }
                     }
                 )
             }
@@ -278,8 +282,14 @@ private fun PackageRow(
             // One package at a time, deliberately. There is no "select all":
             // safety-rules.md rule 1 forbids it, because forty changes at once
             // means nobody can tell which one broke the phone.
+            //
+            // And exactly ONE action per row, chosen by current state. The
+            // first version offered "Switch off" and "Undo" side by side;
+            // hardware testing on 2026-09-10 showed a second press of Undo
+            // undoes the *undo*, performing a disable under a label that
+            // promises the opposite. A button must say what it does.
             if (entry.options.canDisable) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (entry.isEnabled) {
                     OutlinedButton(
                         enabled = !busy,
                         onClick = {
@@ -290,17 +300,21 @@ private fun PackageRow(
                             }
                         },
                     ) { Text("Switch off") }
-
-                    TextButton(
+                } else {
+                    Text(
+                        "Switched off.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedButton(
                         enabled = !busy,
                         onClick = {
                             busy = true
-                            runner.undo(entry.packageName, entry.packageName) {
+                            runner.switchBackOn(entry.packageName, entry.packageName) {
                                 busy = false
                                 onOutcome(it)
                             }
                         },
-                    ) { Text("Undo") }
+                    ) { Text("Switch back on") }
                 }
             }
         }

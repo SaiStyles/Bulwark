@@ -27,6 +27,8 @@ data class Options(
 data class CatalogEntry(
     val packageName: String,
     val isSystem: Boolean,
+    /** Currently switched on. Decides which single action the row offers. */
+    val isEnabled: Boolean,
     val rating: RemovalRating,
     val options: Options,
     val description: String?,
@@ -73,6 +75,7 @@ class PackageCatalog(private val database: UadDatabase) {
     fun build(
         installed: Collection<String>,
         systemPackages: Set<String>,
+        disabledPackages: Set<String> = emptySet(),
     ): List<CatalogEntry> {
         val installedSet = installed.toSet()
         return installed.map { name ->
@@ -80,6 +83,7 @@ class PackageCatalog(private val database: UadDatabase) {
             CatalogEntry(
                 packageName = name,
                 isSystem = name in systemPackages,
+                isEnabled = name !in disabledPackages,
                 rating = entry?.rating ?: RemovalRating.UNKNOWN,
                 options = optionsFor(name, name in systemPackages, entry),
                 description = entry?.description,

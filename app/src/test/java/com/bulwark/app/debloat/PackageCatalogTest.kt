@@ -112,6 +112,19 @@ class PackageCatalogTest {
     }
 
     @Test
+    fun `a disabled package is reported as not enabled`() {
+        // Drives which single action the row offers. Getting this wrong shows
+        // "Switch off" on something already off.
+        val c = catalog("com.oem.bloat" to entry(RemovalRating.RECOMMENDED))
+        val r = c.build(
+            listOf("com.oem.bloat"),
+            systemPackages = setOf("com.oem.bloat"),
+            disabledPackages = setOf("com.oem.bloat"),
+        ).single()
+        assertFalse(r.isEnabled)
+    }
+
+    @Test
     fun `summary counts every package exactly once`() {
         val c = catalog(
             "com.a" to entry(RemovalRating.RECOMMENDED),
