@@ -1,0 +1,20 @@
+uad-packages.json is derived from the Universal Debloater Alliance package
+database:
+
+  https://github.com/Universal-Debloater-Alliance/universal-android-debloater-next-generation
+  resources/assets/uad_lists.json
+  Licence: GPL-3.0 (compatible with Bulwark's GPLv3)
+  Snapshot taken: 2026-09-10
+
+Field names are shortened to keep the asset small; nothing is altered:
+  r = removal   ("Recommended" | "Advanced" | "Expert" | "Unsafe")
+  l = list      ("Aosp" | "Oem" | "Google" | "Carrier" | "Misc")
+  d = description
+  n = neededBy  (packages that depend on this one)
+
+Upstream fetches this list at runtime. Bulwark cannot - see
+context/_shared/conventions.md, constraint 1 - so it is bundled at build time
+and refreshed by rebuilding or by importing a file.
+
+This is years of unglamorous community work that we did not do. Credit it in
+the app, not only here.

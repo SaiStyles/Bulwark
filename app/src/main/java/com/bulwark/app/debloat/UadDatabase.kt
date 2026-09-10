@@ -1,0 +1,117 @@
+package com.bulwark.app.debloat
+
+import android.content.Context
+import org.json.JSONObject
+
+/** How dangerous the community database says removing a package is. */
+enum class RemovalRating {
+    /** Safe for most people. Offered plainly. */
+    RECOMMENDED,
+
+    /** Has consequences worth stating. Offered with a warning. */
+    ADVANCED,
+
+    /** Only if you know exactly why. Behind a deliberate opt-in. */
+    EXPERT,
+
+    /** Never offered as an option. Bootloops, broken modules, dead radios. */
+    UNSAFE,
+
+    /**
+     * Not in the database at all.
+     *
+     * **Treated as not-offered, not as safe.** 57 of the test device's 274
+     * system packages land here because Lava is a small OEM. Silence is not
+     * evidence of safety, and `context/_shared/safety-rules.md` rule 1 says
+     * allowlist, never blocklist.
+     */
+    UNKNOWN,
+    ;
+
+    companion object {
+        fun parse(raw: String?): RemovalRating = when (raw) {
+            "Recommended" -> RECOMMENDED
+            "Advanced" -> ADVANCED
+            "Expert" -> EXPERT
+            "Unsafe" -> UNSAFE
+            else -> UNKNOWN
+        }
+    }
+}
+
+/** What the community database knows about one package. */
+data class UadEntry(
+    val rating: RemovalRating,
+    /** `Aosp`, `Oem`, `Google`, `Carrier`, `Misc` — useful for grouping. */
+    val source: String,
+    /** Plain-language explanation of what it does and what breaks. */
+    val description: String?,
+    /** Installed packages that depend on this one. */
+    val neededBy: List<String>,
+)
+
+/**
+ * The Universal Debloater Alliance package database, bundled and read offline.
+ *
+ * 5,372 entries of community-verified knowledge about what preinstalled
+ * packages actually do — years of unglamorous work this project did not do.
+ * GPL-3.0, compatible with ours. Provenance in
+ * `assets/uad-packages-SOURCE.txt`.
+ *
+ * **Bundled rather than fetched.** Upstream downloads this at launch; Bulwark
+ * holds no `INTERNET` permission and the build fails if one appears
+ * (`context/_shared/conventions.md`). So it ships with the APK and is refreshed
+ * by rebuilding.
+ *
+ * **A bundled list rots.** Say when it was built rather than implying it is
+ * current, and offer file import before the staleness matters.
+ *
+ * Parsed with `org.json` from the platform — no new dependency for reading one
+ * file (`context/_shared/supply-chain.md`).
+ */
+class UadDatabase private constructor(private val entries: Map<String, UadEntry>) {
+
+    val size: Int get() = entries.size
+
+    operator fun get(packageName: String): UadEntry? = entries[packageName]
+
+    fun rating(packageName: String): RemovalRating =
+        entries[packageName]?.rating ?: RemovalRating.UNKNOWN
+
+    companion object {
+        private const val ASSET = "uad-packages.json"
+
+        /** Snapshot date of the bundled data. Show it; do not hide staleness. */
+        const val SNAPSHOT = "2026-09-10"
+
+        /**
+         * Reads and parses the asset. ~1 MB of JSON, so call it off the main
+         * thread and hold the result.
+         */
+        fun load(context: Context): UadDatabase {
+            val json = context.assets.open(ASSET).use { it.readBytes().decodeToString() }
+            val root = JSONObject(json)
+            val parsed = HashMap<String, UadEntry>(root.length())
+
+            val keys = root.keys()
+            while (keys.hasNext()) {
+                val name = keys.next()
+                val o = root.optJSONObject(name) ?: continue
+                val neededBy = o.optJSONArray("n")?.let { arr ->
+                    List(arr.length()) { arr.optString(it) }.filter { it.isNotEmpty() }
+                }.orEmpty()
+
+                parsed[name] = UadEntry(
+                    rating = RemovalRating.parse(o.optString("r").takeIf { it.isNotEmpty() }),
+                    source = o.optString("l"),
+                    description = o.optString("d").takeIf { it.isNotEmpty() },
+                    neededBy = neededBy,
+                )
+            }
+            return UadDatabase(parsed)
+        }
+
+        /** For tests. */
+        fun of(entries: Map<String, UadEntry>) = UadDatabase(entries)
+    }
+}

@@ -1,69 +1,64 @@
 package com.bulwark.app.shizuku
 
-import android.content.ComponentName
 import android.content.Context
-import android.content.ServiceConnection
 import android.content.pm.PackageManager
-import android.os.IBinder
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import rikka.shizuku.Shizuku
 
-/** What Bulwark currently is and is not allowed to do. */
+/** What Bulwark is currently allowed to do. */
 sealed interface ShizukuState {
-    /** Shizuku is not installed, or is installed but not started. */
+    /** Shizuku is not installed, or installed but not started. */
     data object Unavailable : ShizukuState
 
-    /** Alive, but the user has not granted us access yet. */
+    /** Alive, but the user has not granted Bulwark access. */
     data object PermissionRequired : ShizukuState
 
-    /**
-     * Shizuku is running and Bulwark is allowed to use it, but we are
-     * deliberately not holding a privileged connection right now.
-     * This is the correct resting state, not a degraded one.
-     */
-    data object Idle : ShizukuState
-
-    data object Connecting : ShizukuState
-
-    /** Privileged calls are available. */
-    data class Connected(val service: IPrivilegedService) : ShizukuState
-
-    data class Failed(val reason: String) : ShizukuState
+    /** Privileged calls will work. */
+    data object Ready : ShizukuState
 }
 
 /**
  * The single choke point for privileged access.
  *
  * `context/_shared/conventions.md` requires every privileged call to pass
- * through here, so the safety rules are enforceable in one place rather than
- * at every call site.
+ * through here so the safety rules are enforceable in one place rather than at
+ * every call site.
  *
- * Two rules from `safety-rules.md` shape this class:
+ * ## Why there is no "connect" step any more
  *
- * - **Fail closed (rule 6).** Liveness and permission are re-checked
- *   immediately before use, never cached from screen load. Shizuku can die at
- *   any moment — a reboot, or the user stopping it.
- * - **Shizuku is optional at rest.** Bulwark must stay usable with Shizuku
- *   dead: already-applied changes persist on their own, so the app shows
- *   state and disables *changes*, rather than refusing to open.
+ * There used to be one, because privileged work ran in a Shizuku *user
+ * service* - a separate uid-2000 process that had to be bound and released.
+ * That path is dead on MediaTek hardware, which is this project's target
+ * (`context/_shared/app-architecture.md`).
+ *
+ * `ShizukuBinderWrapper` needs no process of its own. Each call wraps a system
+ * binder and Shizuku forwards that single transaction with its uid. So there is
+ * nothing to hold and nothing to leak: privilege is taken per-call and given
+ * back when the call returns.
+ *
+ * That is a better answer to "least privilege, shortest duration"
+ * (`context/_shared/security.md` FIXED-9) than the release-after-use lifecycle
+ * it replaced, and it arrived by being forced rather than by being designed.
+ *
+ * ## Fail closed
+ *
+ * `safety-rules.md` rule 6: liveness and permission are re-read immediately
+ * before use, never cached from screen load. Shizuku can die at any moment.
  */
-class ShizukuGateway(private val appContext: Context) {
+class ShizukuGateway(@Suppress("unused") private val appContext: Context) {
 
     private val _state = MutableStateFlow<ShizukuState>(ShizukuState.Unavailable)
     val state: StateFlow<ShizukuState> = _state.asStateFlow()
 
     private val binderReceived = Shizuku.OnBinderReceivedListener { refresh() }
     private val binderDead = Shizuku.OnBinderDeadListener {
-        // Never queue privileged work to run "when it comes back" — rule 6.
+        // Never queue privileged work to run "when it comes back".
         _state.value = ShizukuState.Unavailable
     }
     private val permissionResult =
-        Shizuku.OnRequestPermissionResultListener { _, grantResult ->
-            if (grantResult == PackageManager.PERMISSION_GRANTED) bind()
-            else _state.value = ShizukuState.PermissionRequired
-        }
+        Shizuku.OnRequestPermissionResultListener { _, _ -> refresh() }
 
     fun start() {
         Shizuku.addBinderReceivedListenerSticky(binderReceived)
@@ -76,63 +71,15 @@ class ShizukuGateway(private val appContext: Context) {
         Shizuku.removeBinderReceivedListener(binderReceived)
         Shizuku.removeBinderDeadListener(binderDead)
         Shizuku.removeRequestPermissionResultListener(permissionResult)
-        release()
     }
 
-    /**
-     * Drops the privileged connection.
-     *
-     * `context/_shared/security.md` treats standing privilege as a hole, not a
-     * convenience: a bound uid-2000 service that outlives the screen needing
-     * it is an idle capability sitting there for anything that compromises
-     * this process to pick up. Holding it costs nothing to give up, because
-     * changes already applied persist without us
-     * (`app-architecture.md`, "Shizuku is optional at rest").
-     *
-     * Re-binding is cheap. Holding privilege is not free.
-     */
-    fun release() {
-        val bound = _state.value is ShizukuState.Connected ||
-            _state.value is ShizukuState.Connecting
-        if (!bound) return
-        try {
-            Shizuku.unbindUserService(userServiceArgs, connection, /* remove = */ true)
-        } catch (_: Throwable) {
-            // Already gone, or Shizuku died. Either way we hold nothing.
-        }
-        _state.value = if (isAlive() && hasPermission()) {
-            ShizukuState.Idle
-        } else {
-            ShizukuState.Unavailable
-        }
-    }
-
-    /** Re-reads live state. Cheap, and safe to call as often as you like. */
+    /** Re-reads live state. Cheap; call it as often as you like. */
     fun refresh() {
-        if (!isAlive()) {
-            _state.value = ShizukuState.Unavailable
-            return
+        _state.value = when {
+            !isAlive() -> ShizukuState.Unavailable
+            !hasPermission() -> ShizukuState.PermissionRequired
+            else -> ShizukuState.Ready
         }
-        if (!hasPermission()) {
-            _state.value = ShizukuState.PermissionRequired
-            return
-        }
-        // Deliberately does NOT bind. Privilege is taken when a privileged
-        // action is requested, not merely because a screen was opened.
-        if (_state.value !is ShizukuState.Connected) _state.value = ShizukuState.Idle
-    }
-
-    /** Take privilege now, because the user asked for something that needs it. */
-    fun connect() {
-        if (!isAlive()) {
-            _state.value = ShizukuState.Unavailable
-            return
-        }
-        if (!hasPermission()) {
-            _state.value = ShizukuState.PermissionRequired
-            return
-        }
-        if (_state.value !is ShizukuState.Connected) bind()
     }
 
     fun requestPermission(requestCode: Int = PERMISSION_REQUEST_CODE) {
@@ -140,8 +87,11 @@ class ShizukuGateway(private val appContext: Context) {
             _state.value = ShizukuState.Unavailable
             return
         }
-        if (hasPermission()) bind() else Shizuku.requestPermission(requestCode)
+        if (hasPermission()) refresh() else Shizuku.requestPermission(requestCode)
     }
+
+    /** True only if a privileged call would work *right now*. */
+    fun canActNow(): Boolean = isAlive() && hasPermission()
 
     private fun isAlive(): Boolean = try {
         Shizuku.pingBinder()
@@ -156,43 +106,7 @@ class ShizukuGateway(private val appContext: Context) {
         false
     }
 
-    private val connection = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-            val service = binder?.let { IPrivilegedService.Stub.asInterface(it) }
-            _state.value = if (service != null && binder.pingBinder()) {
-                ShizukuState.Connected(service)
-            } else {
-                ShizukuState.Failed("Privileged service bound but is not responding.")
-            }
-        }
-
-        override fun onServiceDisconnected(name: ComponentName?) {
-            _state.value = ShizukuState.Unavailable
-        }
-    }
-
-    private fun bind() {
-        _state.value = ShizukuState.Connecting
-        try {
-            Shizuku.bindUserService(userServiceArgs, connection)
-        } catch (t: Throwable) {
-            _state.value = ShizukuState.Failed(t.message ?: t::class.java.simpleName)
-        }
-    }
-
-    private val userServiceArgs by lazy {
-        Shizuku.UserServiceArgs(
-            ComponentName(appContext.packageName, PrivilegedService::class.java.name)
-        )
-            .daemon(false)
-            .processNameSuffix("privileged")
-            .version(SERVICE_VERSION)
-    }
-
     private companion object {
         const val PERMISSION_REQUEST_CODE = 4001
-
-        /** Bump when the AIDL changes, so Shizuku restarts a stale process. */
-        const val SERVICE_VERSION = 1
     }
 }

@@ -69,8 +69,13 @@ object PrivilegedPackages {
      *   than returning an empty list - "zero packages" and "the call failed"
      *   must never look the same on screen.
      */
+    fun list(includeUninstalled: Boolean = false, userId: Int = 0): List<String> =
+        rawPackageInfos(includeUninstalled, userId).mapNotNull { info ->
+            info.javaClass.getField("packageName").get(info) as? String
+        }
+
     @Suppress("UNCHECKED_CAST")
-    fun list(includeUninstalled: Boolean = false, userId: Int = 0): List<String> {
+    private fun rawPackageInfos(includeUninstalled: Boolean, userId: Int): List<Any> {
         val binder = SystemServiceHelper.getSystemService("package")
             ?: error("System package service is unavailable")
 
@@ -96,8 +101,35 @@ object PrivilegedPackages {
         val list = invokeHidden(slice.javaClass, slice, "getList") as? List<Any>
             ?: error("ParceledListSlice.getList returned null")
 
-        return list.mapNotNull { info ->
-            info.javaClass.getField("packageName").get(info) as? String
+        return list
+    }
+
+    /** One installed package, with the little we need to classify it. */
+    data class Installed(val packageName: String, val isSystem: Boolean)
+
+    /**
+     * Like [list], but also reports whether each package is a system package.
+     *
+     * Reads `PackageInfo.applicationInfo.flags` directly - both are ordinary
+     * public types once the privileged call has handed them back, so no bypass
+     * is involved past the enumeration itself.
+     */
+    @Suppress("UNCHECKED_CAST")
+    fun listDetailed(includeUninstalled: Boolean = false, userId: Int = 0): List<Installed> {
+        val infos = rawPackageInfos(includeUninstalled, userId)
+        return infos.mapNotNull { info ->
+            val name = info.javaClass.getField("packageName").get(info) as? String
+                ?: return@mapNotNull null
+            val appInfo = info.javaClass.getField("applicationInfo").get(info)
+            val flags = appInfo?.let {
+                it.javaClass.getField("flags").getInt(it)
+            } ?: 0
+            // FLAG_SYSTEM (1) or FLAG_UPDATED_SYSTEM_APP (128). The second
+            // matters: a system app that received a Play update is still a
+            // system app, and treating it as user-installed would quietly
+            // widen what we offer to remove.
+            val isSystem = (flags and 1) != 0 || (flags and 128) != 0
+            Installed(name, isSystem)
         }
     }
 

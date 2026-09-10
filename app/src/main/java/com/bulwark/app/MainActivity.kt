@@ -13,7 +13,7 @@ import androidx.compose.ui.Modifier
 import com.bulwark.app.security.StrictModePolicy
 import com.bulwark.app.security.WindowHardening
 import com.bulwark.app.shizuku.ShizukuGateway
-import com.bulwark.app.ui.SpikeScreen
+import com.bulwark.app.ui.PackageListScreen
 import com.bulwark.app.ui.theme.BulwarkTheme
 
 class MainActivity : ComponentActivity() {
@@ -32,9 +32,8 @@ class MainActivity : ComponentActivity() {
             BulwarkTheme {
                 val state by gateway.state.collectAsState()
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    SpikeScreen(
+                    PackageListScreen(
                         state = state,
-                        gateway = gateway,
                         modifier = Modifier.padding(innerPadding),
                     )
                 }
