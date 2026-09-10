@@ -2,6 +2,7 @@ package com.bulwark.app.security
 
 import android.app.Activity
 import android.os.Build
+import android.view.View
 import android.view.WindowManager
 
 /**
@@ -39,6 +40,32 @@ object WindowHardening {
         // Set on the decor view so the whole hierarchy inherits the behaviour;
         // Compose has no per-composable equivalent of the View attribute.
         activity.window.decorView.filterTouchesWhenObscured = true
+    }
+
+    /**
+     * Hides this window's content from non-tool accessibility services.
+     *
+     * A malicious Accessibility service can read our screen and synthesise
+     * taps on it. Since Bulwark holds shell access, anything that can press
+     * Bulwark's buttons holds shell by proxy - see `DestructiveActionGuard`,
+     * which is the real defence.
+     *
+     * API 34+ only. It hides content from services that have **not** declared
+     * `isAccessibilityTool`, so genuine screen readers such as TalkBack keep
+     * working. That distinction matters: Bulwark exists for people who are
+     * poorly served by their phones, and blinding a screen reader to "harden"
+     * the app would be a straightforward harm.
+     *
+     * **Honest limit:** `isAccessibilityTool` is self-declared. Malware can
+     * simply claim it. This raises cost, it does not close the hole. Treat
+     * authentication as the control and this as a speed bump.
+     */
+    fun hideFromAutomation(activity: Activity) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            activity.window.decorView.setAccessibilityDataSensitive(
+                View.ACCESSIBILITY_DATA_SENSITIVE_YES
+            )
+        }
     }
 
     /**
