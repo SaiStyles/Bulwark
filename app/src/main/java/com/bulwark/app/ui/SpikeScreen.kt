@@ -88,41 +88,36 @@ fun SpikeScreen(
             is ShizukuState.PermissionRequired ->
                 Button(onClick = { gateway.requestPermission() }) { Text("Grant Bulwark access") }
 
-            is ShizukuState.Idle ->
+            is ShizukuState.Idle, is ShizukuState.Connected ->
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        "Bulwark is not currently holding privileged access. That is the " +
-                            "normal resting state - it takes access only when you ask for " +
-                            "something that needs it, and gives it straight back.",
+                        "Shizuku is available. Privileged calls go through its binder " +
+                            "directly - no separate service process, which is what the " +
+                            "MediaTek user-service failure forced and what turned out to " +
+                            "be simpler anyway.",
                         style = MaterialTheme.typography.bodySmall,
                     )
-                    Button(onClick = { gateway.connect() }) { Text("Connect for this task") }
+                    Button(
+                        enabled = !running,
+                        onClick = {
+                            running = true
+                            error = null
+                            scope.launch {
+                                try {
+                                    result = withContext(Dispatchers.IO) {
+                                        PackageVisibilityProbe(context).run()
+                                    }
+                                } catch (t: Throwable) {
+                                    error = "${t::class.java.simpleName}: ${t.message}"
+                                } finally {
+                                    running = false
+                                }
+                            }
+                        },
+                    ) { Text(if (running) "Counting…" else "Run the probe") }
                 }
 
-            is ShizukuState.Connected -> Button(
-                enabled = !running,
-                onClick = {
-                    running = true
-                    error = null
-                    scope.launch {
-                        try {
-                            result = withContext(Dispatchers.IO) {
-                                PackageVisibilityProbe(context).run(state.service)
-                            }
-                        } catch (t: Throwable) {
-                            error = "${t::class.java.simpleName}: ${t.message}"
-                        } finally {
-                            running = false
-                        }
-                    }
-                },
-            ) { Text(if (running) "Counting…" else "Run the probe") }
-
             else -> Unit
-        }
-
-        if (state is ShizukuState.Connected) {
-            Button(onClick = { gateway.release() }) { Text("Release access now") }
         }
 
         error?.let {

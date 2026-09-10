@@ -1,7 +1,7 @@
 package com.bulwark.app.debloat
 
 import android.content.Context
-import com.bulwark.app.shizuku.IPrivilegedService
+import com.bulwark.app.shizuku.PrivilegedPackages
 
 /**
  * Answer to spike question C in `context/layers/01-debloat.md`.
@@ -65,15 +65,19 @@ class PackageVisibilityProbe(private val context: Context) {
     fun appVisibleCount(): Int =
         context.packageManager.getInstalledPackages(0).size
 
-    /** @throws Exception if the privileged call fails; the caller reports it rather than hiding it. */
-    fun run(service: IPrivilegedService): VisibilityResult {
+    /**
+     * @throws Exception if the privileged call fails; the caller reports it
+     *   rather than hiding it. "Zero packages" and "the call failed" must never
+     *   look the same on screen.
+     */
+    fun run(): VisibilityResult {
         val appVisible = context.packageManager
             .getInstalledPackages(0)
             .map { it.packageName }
             .toSet()
 
-        val privileged = service.listPackages(false).toSet()
-        val withUninstalled = service.listPackages(true).toSet()
+        val privileged = PrivilegedPackages.list(includeUninstalled = false).toSet()
+        val withUninstalled = PrivilegedPackages.list(includeUninstalled = true).toSet()
 
         return VisibilityResult(
             appVisible = appVisible,

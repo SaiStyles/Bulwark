@@ -11,6 +11,7 @@ composeBom = "2026.02.01"
 # Privilege layer. shizuku = the API/provider pair; refine = hidden-API tooling.
 shizuku = "13.1.5"
 refine = "4.4.0"
+hiddenApiBypass = "4.3"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -36,6 +37,13 @@ shizuku-provider = { group = "dev.rikka.shizuku", name = "provider", version.ref
 refine-runtime = { group = "dev.rikka.tools.refine", name = "runtime", version.ref = "refine" }
 refine-annotation = { group = "dev.rikka.tools.refine", name = "annotation", version.ref = "refine" }
 refine-annotation-processor = { group = "dev.rikka.tools.refine", name = "annotation-processor", version.ref = "refine" }
+
+
+# Runtime exemption from the non-SDK blocklist. Justification required by
+# supply-chain.md: Refine solves compile-time typing, NOT the runtime block.
+# Without this there is no privileged enumeration at all, so debloat cannot
+# exist. Verified necessary on hardware 2026-09-10.
+hiddenapibypass = { group = "org.lsposed.hiddenapibypass", name = "hiddenapibypass", version.ref = "hiddenApiBypass" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
