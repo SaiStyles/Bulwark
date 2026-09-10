@@ -11,14 +11,18 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -54,6 +58,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun PackageListScreen(
     state: ShizukuState,
+    runner: ActionRunner,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -62,10 +67,24 @@ fun PackageListScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
     var onlyOffered by remember { mutableStateOf(false) }
+    var notice by remember { mutableStateOf<String?>(null) }
+    var reload by remember { mutableIntStateOf(0) }
+    val interrupted = remember(reload) { runCatching { runner.interrupted() }.getOrDefault(emptyList()) }
+
+    fun report(outcome: ActionRunner.Outcome) {
+        notice = when (outcome) {
+            is ActionRunner.Outcome.Done -> outcome.message
+            is ActionRunner.Outcome.Refused -> outcome.why
+            is ActionRunner.Outcome.Failed -> "Did not work. ${outcome.why}"
+            ActionRunner.Outcome.Cancelled -> null
+        }
+        // Re-read from the device rather than assuming the change landed.
+        if (outcome is ActionRunner.Outcome.Done) reload++
+    }
 
     val ready = state is ShizukuState.Ready
 
-    LaunchedEffect(ready) {
+    LaunchedEffect(ready, reload) {
         if (!ready) return@LaunchedEffect
         try {
             val built = withContext(Dispatchers.IO) {
@@ -110,6 +129,8 @@ fun PackageListScreen(
             ) { CircularProgressIndicator() }
 
             else -> {
+                if (interrupted.isNotEmpty()) InterruptedCard(interrupted.map { it.packageName })
+                notice?.let { NoticeCard(it) { notice = null } }
                 summary?.let { SummaryCard(it) }
 
                 OutlinedTextField(
@@ -138,7 +159,9 @@ fun PackageListScreen(
                 )
 
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(shown, key = { it.packageName }) { PackageRow(it) }
+                    items(shown, key = { it.packageName }) { entry ->
+                        PackageRow(entry, runner, ::report)
+                    }
                 }
             }
         }
@@ -166,7 +189,54 @@ private fun SummaryCard(s: PackageCatalog.Summary) {
 }
 
 @Composable
-private fun PackageRow(entry: CatalogEntry) {
+private fun InterruptedCard(packages: List<String>) {
+    // safety-rules.md rule 6: on ambiguity, stop and report. Bulwark does not
+    // know whether these applied and will not guess, so it says exactly that
+    // rather than quietly "fixing" a change that may never have happened.
+    Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0))) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                "Bulwark was interrupted",
+                style = MaterialTheme.typography.titleSmall,
+                color = Color(0xFF7A3E00),
+            )
+            Text(
+                "It was part-way through changing ${packages.size} app(s) and " +
+                    "never recorded finishing. They may or may not have applied " +
+                    "- Bulwark does not know, and will not guess. Check each one:",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF7A3E00),
+            )
+            packages.forEach {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = Color(0xFF7A3E00),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun NoticeCard(text: String, onDismiss: () -> Unit) {
+    Card {
+        Column(Modifier.padding(14.dp)) {
+            Text(text, style = MaterialTheme.typography.bodyMedium)
+            TextButton(onClick = onDismiss) { Text("OK") }
+        }
+    }
+}
+
+@Composable
+private fun PackageRow(
+    entry: CatalogEntry,
+    runner: ActionRunner,
+    onOutcome: (ActionRunner.Outcome) -> Unit,
+) {
+    var busy by remember(entry.packageName) { mutableStateOf(false) }
+
     Card {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -203,6 +273,35 @@ private fun PackageRow(entry: CatalogEntry) {
                     "Other apps you have installed depend on this: " +
                         entry.neededByInstalled.joinToString(", ")
                 )
+            }
+
+            // One package at a time, deliberately. There is no "select all":
+            // safety-rules.md rule 1 forbids it, because forty changes at once
+            // means nobody can tell which one broke the phone.
+            if (entry.options.canDisable) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        enabled = !busy,
+                        onClick = {
+                            busy = true
+                            runner.disable(entry.packageName, entry.packageName) {
+                                busy = false
+                                onOutcome(it)
+                            }
+                        },
+                    ) { Text("Switch off") }
+
+                    TextButton(
+                        enabled = !busy,
+                        onClick = {
+                            busy = true
+                            runner.undo(entry.packageName, entry.packageName) {
+                                busy = false
+                                onOutcome(it)
+                            }
+                        },
+                    ) { Text("Undo") }
+                }
             }
         }
     }

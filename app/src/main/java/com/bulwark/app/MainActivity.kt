@@ -10,15 +10,20 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import com.bulwark.app.policy.ActionJournal
+import com.bulwark.app.policy.PackageActions
+import com.bulwark.app.policy.SqliteActionLog
 import com.bulwark.app.security.StrictModePolicy
 import com.bulwark.app.security.WindowHardening
 import com.bulwark.app.shizuku.ShizukuGateway
+import com.bulwark.app.ui.ActionRunner
 import com.bulwark.app.ui.PackageListScreen
 import com.bulwark.app.ui.theme.BulwarkTheme
 
 class MainActivity : ComponentActivity() {
 
     private lateinit var gateway: ShizukuGateway
+    private lateinit var runner: ActionRunner
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -33,12 +38,22 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         gateway = ShizukuGateway(applicationContext)
 
+        // Registered here rather than lazily: ActionRunner registers an
+        // activity-result launcher, and that must happen before STARTED.
+        val journal = ActionJournal(SqliteActionLog(applicationContext))
+        runner = ActionRunner(
+            activity = this,
+            actions = PackageActions(journal, packageName),
+            journal = journal,
+        )
+
         setContent {
             BulwarkTheme {
                 val state by gateway.state.collectAsState()
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     PackageListScreen(
                         state = state,
+                        runner = runner,
                         modifier = Modifier.padding(innerPadding),
                     )
                 }

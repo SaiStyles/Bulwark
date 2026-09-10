@@ -1,0 +1,149 @@
+package com.bulwark.app.policy
+
+import com.bulwark.app.shizuku.CommandSafety
+import com.bulwark.app.shizuku.PackageState
+
+/**
+ * Disable and enable, with every guard in the right order.
+ *
+ * This is the only place the three separate protections meet, and the order
+ * they run in is the whole design:
+ *
+ * 1. **`CommandSafety.requireMutable`** - validates the name and refuses
+ *    anything on the never-remove list. It resolves system-ness itself rather
+ *    than accepting it from above, so a caller cannot unlock an OEM-renamed
+ *    telephony package by claiming it is a user app.
+ * 2. **Read the current state** - this is what makes the undo honest. Doing it
+ *    after the guard means we never read state for a package we would refuse.
+ * 3. **`ActionJournal.perform`** - writes the attempt, runs the call, writes
+ *    the outcome. Not a logging call placed next to the work; the work is a
+ *    lambda handed to the recorder, so there is no path that acts without
+ *    recording first.
+ *
+ * ## What is deliberately *not* here
+ *
+ * **Authentication.** `DestructiveActionGuard` needs an `Activity` and returns
+ * through a callback, so it belongs at the UI edge where an Activity exists.
+ * Putting it here would drag Android's window system into the policy layer and
+ * make all of this untestable, which is how a guard ends up unverified.
+ *
+ * The rule that keeps that honest: **nothing calls [disable] except a code
+ * path that has just been handed `Result.Authenticated`.** That is a
+ * convention, and conventions decay - so it is asserted at the one call site
+ * rather than hoped for, and the call site is small enough to read in full.
+ *
+ * **Bulk anything.** There is no `disableAll`. `safety-rules.md` rule 1
+ * forbids it and the absence of the method is the enforcement: forty changes
+ * at once means nobody can tell which one broke the phone.
+ *
+ * ## Unverified on hardware
+ *
+ * Marked 2026-09-10. The composition is unit-tested; the privileged calls
+ * underneath it have never run. Nothing here may be described as working until
+ * it has been watched working on the Agni 2 (`safety-rules.md` rule 7).
+ */
+class PackageActions(
+    private val journal: ActionJournal,
+    /** Our own package name, recorded by the platform as who asked. */
+    private val callingPackage: String,
+    /** Seam for tests. Production passes the real privileged calls. */
+    private val state: StateAccess = PlatformState,
+) {
+
+    /** The two privileged calls this needs, behind a seam so tests can drive them. */
+    interface StateAccess {
+        fun get(packageName: String, userId: Int): Int
+        fun set(packageName: String, state: Int, userId: Int, callingPackage: String)
+    }
+
+    private object PlatformState : StateAccess {
+        override fun get(packageName: String, userId: Int) =
+            PackageState.get(packageName, userId)
+
+        override fun set(packageName: String, state: Int, userId: Int, callingPackage: String) =
+            PackageState.set(packageName, state, userId, callingPackage)
+    }
+
+    /**
+     * Switches [packageName] off, reversibly, recording what it was first.
+     *
+     * @throws IllegalArgumentException if the name is malformed.
+     * @throws SecurityException if it is on the never-remove list.
+     * @throws Exception if the privileged call fails - after recording that it
+     *   failed. Rule 6: the caller must see this, never a swallowed error.
+     */
+    fun disable(packageName: String, userId: Int = 0) {
+        CommandSafety.requireMutable(packageName)
+
+        // Read before acting. If this throws we have changed nothing, and an
+        // unreadable state is not something to guess at - a disable whose undo
+        // is a guess is not reversible, it is merely usually reversible.
+        val previous = state.get(packageName, userId)
+
+        if (PackageState.isDisabled(previous)) return // Already off. Do nothing, log nothing.
+
+        journal.perform(
+            kind = ActionKind.DISABLE,
+            packageName = packageName,
+            userId = userId,
+            previousState = previous,
+        ) {
+            state.set(packageName, PackageState.DISABLED_USER, userId, callingPackage)
+        }
+    }
+
+    /**
+     * Puts [packageName] back to [previousState], or to the system default
+     * when nothing was recorded.
+     *
+     * Still passes `requireMutable`. Enabling is not destructive, but the
+     * validation half matters just as much - and a package on the never-remove
+     * list should never have been disabled by us, so being asked to re-enable
+     * one means something upstream is wrong and should fail loudly.
+     */
+    fun enable(packageName: String, previousState: Int?, userId: Int = 0) {
+        CommandSafety.requireMutable(packageName)
+
+        journal.perform(
+            kind = ActionKind.ENABLE,
+            packageName = packageName,
+            userId = userId,
+            previousState = previousState,
+        ) {
+            state.set(
+                packageName,
+                previousState ?: PackageState.DEFAULT,
+                userId,
+                callingPackage,
+            )
+        }
+    }
+
+    /**
+     * Undoes the most recent successful change to [packageName].
+     *
+     * Reads the plan from the log rather than from anything the UI is holding,
+     * because the log is the thing that survives the process dying. A user who
+     * force-stopped Bulwark mid-session and came back must still be able to
+     * undo.
+     *
+     * Returns false when there is nothing to undo, rather than throwing:
+     * "nothing to do" is a normal answer here, not a failure.
+     */
+    fun undoLast(packageName: String, userId: Int = 0): Boolean {
+        val step = journal.history()
+            .filter { it.packageName == packageName }
+            .undoPlan()
+            .firstOrNull() ?: return false
+
+        when (step.kind) {
+            ActionKind.ENABLE -> enable(packageName, step.previousState, userId)
+            ActionKind.DISABLE -> disable(packageName, userId)
+            // Uninstall and its undo do not exist yet. Refusing loudly beats
+            // silently doing nothing, which would read to the user as "undo
+            // worked" when nothing had happened.
+            else -> error("No undo implemented for ${step.kind}")
+        }
+        return true
+    }
+}
