@@ -6,101 +6,79 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The two-guard rule, asserted.
+ * The offer-do-not-enforce rule, asserted.
  *
- * This is the logic that decides whether a stranger is shown a button that
- * removes part of their phone. It is worth more tests than it has code.
+ * This decides what a stranger is shown about their own phone. Two properties
+ * matter and both are tested: nothing that breaks the route back is ever
+ * offered, and nothing else is silently withheld.
  */
 class PackageCatalogTest {
 
-    private fun entry(
-        rating: RemovalRating,
-        description: String? = "does a thing",
-        neededBy: List<String> = emptyList(),
-    ) = UadEntry(rating, "Oem", description, neededBy)
-
-    private fun catalog(vararg pairs: Pair<String, UadEntry>) =
-        PackageCatalog(UadDatabase.of(pairs.toMap()))
-
     @Test
-    fun `offers a package both guards allow`() {
+    fun `offers a documented safe package both ways`() {
         val c = catalog("com.oem.weather" to entry(RemovalRating.RECOMMENDED))
-        val result = c.build(listOf("com.oem.weather"), setOf("com.oem.weather")).single()
-        assertTrue(result.isOffered)
-        assertEquals(RemovalRating.RECOMMENDED, result.rating)
+        val r = c.build(listOf("com.oem.weather"), setOf("com.oem.weather")).single()
+        assertTrue(r.options.canDisable)
+        assertTrue(r.options.canUninstall)
     }
 
     @Test
-    fun `our guard wins even when the database says Recommended`() {
-        // The floor is ours. No database entry can raise it - that is the
-        // whole point of having a structural list underneath.
-        val c = catalog("com.mediatek.ims" to entry(RemovalRating.RECOMMENDED))
-        val result = c.build(listOf("com.mediatek.ims"), setOf("com.mediatek.ims")).single()
-        assertFalse(result.isOffered)
-        assertTrue(result.verdict is Verdict.Protected)
-    }
-
-    @Test
-    fun `database Unsafe blocks a package our guard allows`() {
-        // This is the case that justifies having a second guard at all.
-        //
-        // com.android.mtp is one of 11 packages on the real test device that
-        // our structural list permits and the community database marks Unsafe.
-        // It is not protected by shape - nothing in the name says "system
-        // critical" - only by somebody having written down what it does.
-        // A category list cannot hold that kind of knowledge, which is exactly
-        // why it is not the only guard.
-        val c = catalog("com.android.mtp" to entry(RemovalRating.UNSAFE, "MTP Host"))
-        val result = c.build(listOf("com.android.mtp"), setOf("com.android.mtp")).single()
-
-        assertFalse(result.isOffered)
-        assertTrue(result.verdict is Verdict.TooRisky)
-        assertTrue((result.verdict as Verdict.TooRisky).reason.contains("MTP"))
-    }
-
-    @Test
-    fun `guard one now covers the bootloop cases it used to miss`() {
-        // Cross-referencing against the real device on 2026-09-10 found 23
-        // Unsafe packages our list allowed. The structural ones were added, so
-        // these are now refused by guard one and never reach guard two.
+    fun `things that break the route back are still refused outright`() {
         val c = catalog()
-        listOf(
-            "com.google.android.networkstack",
-            "com.google.android.overlay.modules.modulemetadata.forframework",
-            "com.mediatek",
-        ).forEach { name ->
-            val r = c.build(listOf(name), setOf(name)).single()
-            assertTrue("$name must be protected", r.verdict is Verdict.Protected)
-        }
-    }
-
-    @Test
-    fun `a package nobody has documented is NOT offered`() {
-        // 57 of the test device's 274 system packages land here. Silence is
-        // not evidence of safety - safety-rules.md rule 1.
-        val result = catalog().build(listOf("com.lava.mystery"), setOf("com.lava.mystery")).single()
-        assertFalse(result.isOffered)
-        assertEquals(Verdict.Unknown, result.verdict)
-    }
-
-    @Test
-    fun `every refusal carries a reason`() {
-        val c = catalog(
-            "com.android.phone" to entry(RemovalRating.RECOMMENDED),
-            "com.bad.thing" to entry(RemovalRating.UNSAFE, "bootloops the device"),
-        )
-        val results = c.build(
-            listOf("com.android.phone", "com.bad.thing"),
-            setOf("com.android.phone", "com.bad.thing"),
-        )
-        results.forEach { r ->
-            val reason = when (val v = r.verdict) {
-                is Verdict.Protected -> v.reason
-                is Verdict.TooRisky -> v.reason
-                else -> ""
+        listOf("com.android.systemui", "com.android.phone", "com.google.android.networkstack")
+            .forEach { name ->
+                val r = c.build(listOf(name), setOf(name)).single()
+                assertTrue("$name must be refused", r.options.isRefused)
+                assertFalse(r.options.canDisable)
             }
-            assertTrue("refusal needs a reason: ${r.packageName}", reason.isNotBlank())
-        }
+    }
+
+    @Test
+    fun `every refusal explains itself`() {
+        val r = catalog().build(listOf("com.android.phone"), setOf("com.android.phone")).single()
+        assertTrue(r.options.refusal!!.isNotBlank())
+    }
+
+    @Test
+    fun `the hard floor wins even when the database says Recommended`() {
+        // Telephony breaks the route back: you cannot call for help about a
+        // phone that cannot call. No database entry raises that floor.
+        val c = catalog("com.mediatek.ims" to entry(RemovalRating.RECOMMENDED))
+        val r = c.build(listOf("com.mediatek.ims"), setOf("com.mediatek.ims")).single()
+        assertFalse(r.isOffered)
+        assertTrue(r.options.isRefused)
+    }
+
+    @Test
+    fun `undocumented packages are OFFERED, with an honest label`() {
+        // We give options; we do not enforce. Refusing everything unknown was
+        // paternalism dressed as safety - 43 of the test device's packages are
+        // just Lava software nobody has audited, not landmines.
+        val r = catalog().build(listOf("com.pri.applock"), setOf("com.pri.applock")).single()
+        assertTrue("must be offered", r.options.canDisable)
+        assertFalse("but not uninstallable", r.options.canUninstall)
+        assertTrue(
+            "must say nobody documented it: ${r.options.warning}",
+            r.options.warning!!.contains("Nobody has documented"),
+        )
+    }
+
+    @Test
+    fun `a risky package can still be switched off, but never uninstalled`() {
+        val c = catalog("com.android.mtp" to entry(RemovalRating.UNSAFE, "MTP Host"))
+        val r = c.build(listOf("com.android.mtp"), setOf("com.android.mtp")).single()
+        assertTrue(r.options.canDisable)
+        assertFalse(r.options.canUninstall)
+        assertTrue(r.options.warning!!.contains("MTP"))
+    }
+
+    @Test
+    fun `sensitive but recoverable things warn instead of refusing`() {
+        // Losing your SMS app is bad. It is not the same as a phone that
+        // cannot dial emergency services, and treating them alike was wrong.
+        val r = catalog().build(listOf("com.android.mms"), setOf("com.android.mms")).single()
+        assertTrue("messaging must stay offerable", r.options.canDisable)
+        assertTrue(r.options.warning!!.contains("two-factor", ignoreCase = true))
     }
 
     @Test
@@ -121,19 +99,6 @@ class PackageCatalogTest {
     }
 
     @Test
-    fun `offered packages sort first so the useful list is at the top`() {
-        val c = catalog(
-            "com.zzz.removable" to entry(RemovalRating.RECOMMENDED),
-            "com.aaa.risky" to entry(RemovalRating.UNSAFE),
-        )
-        val names = c.build(
-            listOf("com.aaa.risky", "com.zzz.removable"),
-            setOf("com.aaa.risky", "com.zzz.removable"),
-        ).map { it.packageName }
-        assertEquals(listOf("com.zzz.removable", "com.aaa.risky"), names)
-    }
-
-    @Test
     fun `summary counts every package exactly once`() {
         val c = catalog(
             "com.a" to entry(RemovalRating.RECOMMENDED),
@@ -146,6 +111,18 @@ class PackageCatalogTest {
         )
         val s = c.summarise(entries)
         assertEquals(4, s.total)
-        assertEquals(s.total, s.offered + s.protected + s.tooRisky + s.unknown)
+        // Every package is either offered or refused, never both and never
+        // neither. If this drifts, the summary is lying to the user about
+        // their own phone.
+        assertEquals(s.total, s.offered + s.refused)
     }
+
+    private fun entry(
+        rating: RemovalRating,
+        description: String? = "does a thing",
+        neededBy: List<String> = emptyList(),
+    ) = UadEntry(rating, "Oem", description, neededBy)
+
+    private fun catalog(vararg pairs: Pair<String, UadEntry>) =
+        PackageCatalog(UadDatabase.of(pairs.toMap()))
 }

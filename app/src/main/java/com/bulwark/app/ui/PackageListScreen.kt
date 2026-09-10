@@ -33,7 +33,6 @@ import com.bulwark.app.debloat.CatalogEntry
 import com.bulwark.app.debloat.PackageCatalog
 import com.bulwark.app.debloat.RemovalRating
 import com.bulwark.app.debloat.UadDatabase
-import com.bulwark.app.debloat.Verdict
 import com.bulwark.app.shizuku.PrivilegedPackages
 import com.bulwark.app.shizuku.ShizukuState
 import kotlinx.coroutines.Dispatchers
@@ -124,7 +123,7 @@ fun PackageListScreen(
                 FilterChip(
                     selected = onlyOffered,
                     onClick = { onlyOffered = !onlyOffered },
-                    label = { Text("Only what Bulwark would offer") },
+                    label = { Text("Only what I can change") },
                 )
 
                 val shown = entries.orEmpty().filter { e ->
@@ -151,10 +150,10 @@ private fun SummaryCard(s: PackageCatalog.Summary) {
     Card {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text("${s.total} packages installed", style = MaterialTheme.typography.titleMedium)
-            Text("${s.offered} Bulwark would offer to remove")
-            Text("${s.protected} protected — never removable")
-            Text("${s.tooRisky} known to be unsafe to remove")
-            Text("${s.unknown} unknown — not offered, because nobody has verified them")
+            Text("${s.offered} you can switch off — reversible, data kept")
+            Text("${s.uninstallable} also safe to uninstall outright")
+            Text("${s.refused} Bulwark refuses — they break your way back")
+            Text("${s.unknown} undocumented — offered, but labelled honestly")
             Text(
                 "Package data snapshot ${UadDatabase.SNAPSHOT}, from the Universal " +
                     "Debloater Alliance. Bundled, not downloaded — Bulwark makes no " +
@@ -184,14 +183,19 @@ private fun PackageRow(entry: CatalogEntry) {
                 Text(it.lineSequence().first(), style = MaterialTheme.typography.bodySmall)
             }
 
-            when (val v = entry.verdict) {
-                is Verdict.Protected -> Reason("Bulwark will never remove this. ${v.reason}")
-                is Verdict.TooRisky -> Reason("Known to be unsafe to remove. ${v.reason}")
-                is Verdict.Unknown -> Reason(
-                    "Not offered. Nobody has verified what removing this does, and " +
-                        "an unverified guess is how a phone gets bricked."
+            entry.options.refusal?.let {
+                Reason("Bulwark will not touch this. $it")
+            }
+            entry.options.warning?.let { Reason(it) }
+
+            if (!entry.options.isRefused) {
+                Reason(
+                    buildString {
+                        append("You can: switch it off")
+                        if (entry.options.canUninstall) append(", or uninstall it")
+                        append(". Both are reversible.")
+                    }
                 )
-                is Verdict.Offered -> Unit
             }
 
             if (entry.neededByInstalled.isNotEmpty()) {
@@ -211,16 +215,13 @@ private fun Reason(text: String) {
 
 @Composable
 private fun Badge(entry: CatalogEntry) {
-    val (label, colour) = when (entry.verdict) {
-        is Verdict.Offered -> when (entry.rating) {
-            RemovalRating.RECOMMENDED -> "SAFE" to Color(0xFF2E7D32)
-            RemovalRating.ADVANCED -> "CARE" to Color(0xFFE65100)
-            RemovalRating.EXPERT -> "EXPERT" to Color(0xFF6A1B9A)
-            else -> "?" to Color.Gray
-        }
-        is Verdict.Protected -> "LOCKED" to Color(0xFF1565C0)
-        is Verdict.TooRisky -> "UNSAFE" to Color(0xFFB71C1C)
-        is Verdict.Unknown -> "UNKNOWN" to Color.Gray
+    val (label, colour) = when {
+        entry.options.isRefused -> "LOCKED" to Color(0xFF1565C0)
+        entry.rating == RemovalRating.RECOMMENDED -> "SAFE" to Color(0xFF2E7D32)
+        entry.rating == RemovalRating.ADVANCED -> "CARE" to Color(0xFFE65100)
+        entry.rating == RemovalRating.EXPERT -> "EXPERT" to Color(0xFF6A1B9A)
+        entry.rating == RemovalRating.UNSAFE -> "RISKY" to Color(0xFFB71C1C)
+        else -> "UNKNOWN" to Color.Gray
     }
     Text(
         label,

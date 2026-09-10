@@ -3,40 +3,36 @@ package com.bulwark.app.debloat
 import com.bulwark.app.shizuku.ProtectedPackages
 
 /**
- * Whether Bulwark will offer to remove a package, and why not when it will not.
+ * What Bulwark offers for one package, and what it says first.
  *
- * A user told "no" without a reason goes looking for a tool that just says yes,
- * so every refusal carries an explanation.
+ * **We give options; we do not enforce.** The only outright refusals are things
+ * that break the user's route back - see [com.bulwark.app.shizuku.ProtectedPackages].
+ * Everything else is offered with whatever is honestly known about it, and the
+ * person who owns the phone decides.
  */
-sealed interface Verdict {
-
-    /** Both guards allow it. [rating] decides how loudly the UI warns. */
-    data class Offered(val rating: RemovalRating) : Verdict
-
-    /** Our own never-remove list refuses. Structural: telephony, system UI, … */
-    data class Protected(val reason: String) : Verdict
-
-    /** The community database marks it Unsafe — bootloops, dead modules. */
-    data class TooRisky(val reason: String) : Verdict
-
-    /**
-     * Nothing known about it. **Not offered**, and deliberately not treated as
-     * safe: silence is not evidence.
-     */
-    data object Unknown : Verdict
+data class Options(
+    /** Reversible with `pm enable`, data kept. The default action. */
+    val canDisable: Boolean,
+    /** The escalation. Verified-safe packages only, per safety rule 3. */
+    val canUninstall: Boolean,
+    /** Shown before acting. Not a refusal - information. */
+    val warning: String?,
+    /** Set only when nothing is offered at all. */
+    val refusal: String?,
+) {
+    val isRefused: Boolean get() = refusal != null
 }
 
-/** One installed package, with everything needed to decide and to explain. */
+/** One installed package, with everything needed to act and to explain. */
 data class CatalogEntry(
     val packageName: String,
     val isSystem: Boolean,
-    val verdict: Verdict,
+    val rating: RemovalRating,
+    val options: Options,
     val description: String?,
     val neededByInstalled: List<String>,
 ) {
-    val isOffered: Boolean get() = verdict is Verdict.Offered
-    val rating: RemovalRating
-        get() = (verdict as? Verdict.Offered)?.rating ?: RemovalRating.UNKNOWN
+    val isOffered: Boolean get() = options.canDisable || options.canUninstall
 }
 
 /**
@@ -54,10 +50,18 @@ data class CatalogEntry(
  *   chance of bootlooping". But it covers only 217 of this device's 274 system
  *   packages, because Lava is a small OEM.
  *
- * **A package is offered only if both allow it.** Full reasoning in
- * `context/layers/01-debloat.md`.
+ * ## Offer, do not enforce
  *
- * Read-only. Nothing here removes anything; it decides what may be *offered*.
+ * The guards decide what is *offered* and what is *said first* - not what the
+ * user is permitted to want. Only things that break the route back are refused
+ * outright. Everything else is presented with what is honestly known about it,
+ * including "nobody knows", and the person who owns the phone decides.
+ *
+ * Uninstall is gated harder than disable because the two are not the same bet:
+ * disable is reversible with `pm enable` and keeps app data, so it is the
+ * default (`safety-rules.md` rule 3).
+ *
+ * Read-only. Nothing here changes anything; it decides what may be offered.
  */
 class PackageCatalog(private val database: UadDatabase) {
 
@@ -76,7 +80,8 @@ class PackageCatalog(private val database: UadDatabase) {
             CatalogEntry(
                 packageName = name,
                 isSystem = name in systemPackages,
-                verdict = verdictFor(name, entry),
+                rating = entry?.rating ?: RemovalRating.UNKNOWN,
+                options = optionsFor(name, entry),
                 description = entry?.description,
                 // Only dependents that are actually present. A warning about an
                 // app the user does not have is noise, and noise gets ignored.
@@ -85,39 +90,58 @@ class PackageCatalog(private val database: UadDatabase) {
         }.sortedWith(compareBy({ !it.isOffered }, { it.packageName }))
     }
 
-    private fun verdictFor(name: String, entry: UadEntry?): Verdict {
-        // Guard one first. It is ours, it is structural, and it is the floor
-        // no database entry can raise.
-        ProtectedPackages.reasonFor(name)?.let { return Verdict.Protected(it) }
-
-        // Guard two.
-        if (entry == null) return Verdict.Unknown
-
-        return when (entry.rating) {
-            RemovalRating.UNSAFE -> Verdict.TooRisky(
-                entry.description?.lineSequence()?.firstOrNull()?.trim()
-                    ?: "Marked unsafe to remove by the community database."
-            )
-            RemovalRating.UNKNOWN -> Verdict.Unknown
-            else -> Verdict.Offered(entry.rating)
+    private fun optionsFor(name: String, entry: UadEntry?): Options {
+        // Hard floor first. Nothing below can raise it.
+        ProtectedPackages.reasonFor(name)?.let {
+            return Options(canDisable = false, canUninstall = false, warning = null, refusal = it)
         }
+
+        val caution = ProtectedPackages.cautionFor(name)
+        val rating = entry?.rating ?: RemovalRating.UNKNOWN
+
+        // Uninstall is the escalation: only where the package is documented and
+        // rated safe enough. Everything else that is allowed at all can be
+        // disabled, which is reversible with `pm enable` and keeps app data.
+        val canUninstall = rating == RemovalRating.RECOMMENDED || rating == RemovalRating.ADVANCED
+
+        val warning = when {
+            caution != null -> caution
+            rating == RemovalRating.UNKNOWN ->
+                "Nobody has documented this package. It may be specific to your " +
+                    "phone. Turning it off is reversible, but do it one at a time " +
+                    "so you can tell what changed."
+            rating == RemovalRating.UNSAFE ->
+                entry?.description?.lineSequence()?.firstOrNull()?.trim()
+                    ?.let { "Known to cause problems: $it" }
+                    ?: "The community database marks this unsafe to remove."
+            rating == RemovalRating.EXPERT ->
+                "Only turn this off if you know what it does."
+            else -> null
+        }
+
+        return Options(
+            canDisable = true,
+            canUninstall = canUninstall,
+            warning = warning,
+            refusal = null,
+        )
     }
 
     /** Counts for the UI header, so the user can see the shape of their device. */
     fun summarise(entries: List<CatalogEntry>): Summary = Summary(
         total = entries.size,
         offered = entries.count { it.isOffered },
-        protected = entries.count { it.verdict is Verdict.Protected },
-        tooRisky = entries.count { it.verdict is Verdict.TooRisky },
-        unknown = entries.count { it.verdict is Verdict.Unknown },
+        refused = entries.count { it.options.isRefused },
+        uninstallable = entries.count { it.options.canUninstall },
+        unknown = entries.count { it.rating == RemovalRating.UNKNOWN && !it.options.isRefused },
         recommended = entries.count { it.rating == RemovalRating.RECOMMENDED },
     )
 
     data class Summary(
         val total: Int,
         val offered: Int,
-        val protected: Int,
-        val tooRisky: Int,
+        val refused: Int,
+        val uninstallable: Int,
         val unknown: Int,
         val recommended: Int,
     )

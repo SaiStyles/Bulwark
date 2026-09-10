@@ -32,14 +32,50 @@ class ProtectedPackagesTest {
     }
 
     @Test
-    fun `protects the messaging stack`() {
+    fun `messaging is warned about, not refused`() {
+        // Changed 2026-09-10. Messaging used to sit on the hard floor. It does
+        // not belong there: losing your SMS app is bad and recoverable, unlike
+        // a phone that cannot dial emergency services. Refusing both alike was
+        // paternalism dressed as safety, in an app whose whole argument is that
+        // people should control their own devices.
         listOf(
             "com.android.mms",
             "com.google.android.apps.messaging",
-            "com.android.cellbroadcastreceiver",
-            "com.android.messaging",
         ).forEach {
-            assertTrue("must protect $it", ProtectedPackages.isProtected(it))
+            assertFalse("$it must not be hard-refused", ProtectedPackages.isProtected(it))
+            val caution = ProtectedPackages.cautionFor(it)
+            assertNotNull("$it must still warn", caution)
+            assertTrue(
+                "warning must name the real cost: $caution",
+                caution!!.contains("two-factor", ignoreCase = true),
+            )
+        }
+    }
+
+    @Test
+    fun `emergency alerts stay on the hard floor`() {
+        // Cell broadcast carries evacuation orders and earthquake warnings.
+        // Not "route back" - life safety. Android already lets people switch
+        // off alert categories in Settings, reversibly; deleting the receiver
+        // is not that, and the downside is missing an evacuation order.
+        listOf(
+            "com.android.cellbroadcastreceiver",
+            "com.google.android.cellbroadcastreceiver",
+        ).forEach {
+            assertTrue("$it must be refused outright", ProtectedPackages.isProtected(it))
+        }
+    }
+
+    @Test
+    fun `the hard floor is route-back plus life safety, and nothing else`() {
+        listOf(
+            "com.android.phone",          // cannot call for help about no calls
+            "com.android.systemui",       // no UI left to fix it with
+            "com.android.settings",
+            "com.google.android.networkstack",  // bootloop class
+        ).forEach {
+            assertTrue("$it must be refused outright", ProtectedPackages.isProtected(it))
+            assertNull("refused things do not also warn", ProtectedPackages.cautionFor(it))
         }
     }
 

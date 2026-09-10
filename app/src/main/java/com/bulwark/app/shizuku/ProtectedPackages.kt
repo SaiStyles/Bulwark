@@ -1,29 +1,46 @@
 package com.bulwark.app.shizuku
 
 /**
- * The packages Bulwark must never disable or remove, enforced in code.
+ * Two tiers: what Bulwark refuses outright, and what it warns about.
  *
- * `context/_shared/safety-rules.md` names these as permanently off-limits
- * "regardless of what any allowlist says", and `context/layers/01-debloat.md`
- * promises they are "excluded at the wrapper level, not just in the UI, so a
- * bad allowlist entry still cannot remove them".
+ * ## The line, narrowed 2026-09-10
  *
- * This file is that promise. It is checked inside [PrivilegedService], on the
- * uid-2000 side of the binder — **below** the UI, below the policy engine, and
- * below any caller. A compromised or simply buggy layer above cannot route
- * around it, because the check does not live up there.
+ * The hard floor is **not** "this is dangerous". Two things put a package on it,
+ * and nothing else does.
  *
- * ## Why it fails closed
+ * **1. It breaks the thing you would use to undo it.**
  *
- * Matching is deliberately over-broad. A false positive means a user keeps a
- * package they wanted gone, and complains. A false negative means someone's
- * only phone cannot dial emergency services. Those costs are not comparable,
- * so every ambiguous case resolves to "protected".
+ * - Telephony. A phone that cannot dial emergency services is not a risk you
+ *   get to accept on someone else's behalf, and you cannot fix it by calling
+ *   for help.
+ * - SystemUI, launcher, Settings, the package installer, the permission
+ *   controller. Turn these off and there is no screen left to turn them back on
+ *   with.
+ * - Bootloop-class framework modules. The undo is a factory reset.
  *
- * ## Adding to this list
+ * **2. It is a life-safety system.** Emergency calling, and cell broadcast -
+ * the channel that carries evacuation orders and earthquake warnings. Android
+ * already lets people switch off alert *categories* in Settings, reversibly and
+ * discoverably. Deleting the receiver is not that, and the downside is missing
+ * an evacuation order. That is not a trade we offer on someone's behalf.
  *
- * Free. Removing from it is not: it needs evidence from a real device and a
- * note in the device card. Never narrow a rule here to make a feature work.
+ * Everything else is the user's call. This file used to refuse messaging,
+ * Wi-Fi and security components too - that was paternalism dressed as safety.
+ * They are reversible, so [cautionFor] warns and the user decides.
+ *
+ * **Bulwark exists because Android decides for people. Copying that habit
+ * while claiming to fight it would be the worst possible outcome.**
+ *
+ * ## Where it is enforced
+ *
+ * Below the UI and below the policy engine, on the uid-2000 side of the binder
+ * (`CommandSafety.requireMutable`). A buggy or compromised layer above cannot
+ * route around a check that does not live up there.
+ *
+ * ## Adding to the hard floor
+ *
+ * Free, if it genuinely breaks the recovery path. Removing from it needs
+ * evidence from real hardware and a note in the device card.
  */
 object ProtectedPackages {
 
@@ -36,19 +53,15 @@ object ProtectedPackages {
      * to protect exactly the device the project was built around.
      */
     private val PROTECTED_FRAGMENTS = listOf(
-        // Telephony and calling. Breaking IMS can break emergency calls.
+        // Telephony and calling. Breaking IMS can break emergency calls, and
+        // there is no undo you can reach while unable to phone anyone.
         "telephony", "telecom", "ims", "carrier", "dialer", "phone",
         "emergency", "sim", "euicc", "radio", "modem", "volte", "rcs",
 
-        // Messaging. Carries 2FA codes and emergency alerts.
-        "sms", "mms", "messaging", "cellbroadcast",
-
-        // Things that make the device usable or recoverable at all.
+        // The recovery path itself. Disable SystemUI or the launcher and you
+        // cannot reach Settings to put it back.
         "systemui", "launcher", "settings", "packageinstaller",
         "permissioncontroller", "provision", "setupwizard", "keyguard",
-
-        // Security and identity components.
-        "keychain", "certinstaller", "credential", "biometric", "fingerprint",
 
         // Core framework surfaces.
         "com.android.systemui", "android.system", "com.android.providers",
@@ -86,7 +99,11 @@ object ProtectedPackages {
         "com.android.server.telecom",
         "com.android.phone",
         "com.android.emergency",
+        // Emergency broadcast alerts - evacuation orders, earthquake warnings.
+        // Life safety, not convenience. Alert categories remain switchable in
+        // Settings; that is the reversible control, and this is not it.
         "com.android.cellbroadcastreceiver",
+        "com.google.android.cellbroadcastreceiver",
         "com.android.permissioncontroller",
         "com.android.packageinstaller",
         "com.google.android.permissioncontroller",
@@ -106,6 +123,26 @@ object ProtectedPackages {
     )
 
     /**
+     * Serious consequences, but recoverable - so **offered with a warning
+     * rather than refused**.
+     *
+     * Losing your messaging app is bad. It is not the same kind of bad as a
+     * phone that cannot dial emergency services or reach its own Settings, and
+     * treating them identically was paternalism dressed as safety. The user
+     * owns the device; our job is to make sure they know what they are
+     * choosing, not to choose for them.
+     */
+    private val CAUTION_FRAGMENTS = listOf(
+        // Carries 2FA codes. The emergency-broadcast receivers themselves are
+        // on the hard floor above; ordinary messaging is not.
+        "sms", "mms", "messaging",
+        // Security and identity components.
+        "keychain", "certinstaller", "credential", "biometric", "fingerprint",
+        // Connectivity. Losing Wi-Fi on a phone with no data is isolating.
+        "wifi", "bluetooth", "nfc",
+    )
+
+    /**
      * True when [packageName] must never be disabled or uninstalled.
      *
      * Case-insensitive, because package names are compared as text here and
@@ -119,9 +156,39 @@ object ProtectedPackages {
     }
 
     /**
-     * Human-readable reason, for the UI and for the action log. A user told
-     * "no" deserves to be told why, or they will look for a tool that just
-     * says yes.
+     * A warning to show *before acting*, or null if there is nothing to say.
+     *
+     * Never a refusal. If this returns text, the action still happens when the
+     * user chooses it - they simply get told what they are trading first.
+     */
+    fun cautionFor(packageName: String): String? {
+        if (isProtected(packageName)) return null // Already refused outright.
+        val name = packageName.lowercase()
+        return when {
+            listOf("sms", "mms", "messaging", "cellbroadcast").any { name.contains(it) } ->
+                "This is part of the messaging system. Turning it off can stop " +
+                    "two-factor codes and emergency alerts from arriving."
+
+            listOf("keychain", "certinstaller", "credential", "biometric", "fingerprint")
+                .any { name.contains(it) } ->
+                "This is a security component. Turning it off may weaken the " +
+                    "phone rather than protect it."
+
+            listOf("wifi", "bluetooth", "nfc").any { name.contains(it) } ->
+                "This handles a radio your phone uses to connect. Turning it " +
+                    "off may leave you without Wi-Fi, Bluetooth or contactless."
+
+            CAUTION_FRAGMENTS.any { name.contains(it) } ->
+                "This is a sensitive system component. It is reversible, but " +
+                    "check you know what it does first."
+
+            else -> null
+        }
+    }
+
+    /**
+     * Why an outright refusal happened. A user told "no" deserves to be told
+     * why, or they will go looking for a tool that just says yes.
      */
     fun reasonFor(packageName: String): String? {
         if (!isProtected(packageName)) return null
@@ -133,19 +200,14 @@ object ProtectedPackages {
                 "Part of the calling system. Removing it can stop the phone " +
                     "making calls, including emergency calls."
 
-            listOf("sms", "mms", "messaging", "cellbroadcast").any { name.contains(it) } ->
-                "Part of the messaging system. Removing it can stop two-factor " +
-                    "codes and emergency alerts arriving."
-
             listOf("systemui", "launcher", "settings", "keyguard", "setupwizard",
                 "provision", "packageinstaller").any { name.contains(it) } ->
                 "Required to operate the phone. Removing it can leave the " +
                     "device unusable with no way back except a factory reset."
 
-            listOf("permissioncontroller", "keychain", "certinstaller",
-                "credential", "biometric", "fingerprint").any { name.contains(it) } ->
-                "A security component. Removing it would weaken the phone " +
-                    "while appearing to harden it."
+            name.contains("permissioncontroller") ->
+                "Controls app permissions. Removing it takes away the screen " +
+                    "you would use to undo anything else."
 
             else ->
                 "On Bulwark's permanent never-remove list. If you believe this " +
