@@ -51,6 +51,20 @@ data class VisibilityResult(
 
 class PackageVisibilityProbe(private val context: Context) {
 
+    /**
+     * What Bulwark sees on its own, under targetSdk 37 filtering.
+     *
+     * Needs no Shizuku, no privilege and no binding - which makes it half the
+     * spike answer, available the moment the app opens. Compare it against
+     * `pm list packages` run as shell.
+     *
+     * Split out on 2026-09-10 after the user-service path turned out to be
+     * broken on MediaTek hardware. The measurement did not depend on it; only
+     * the plumbing did.
+     */
+    fun appVisibleCount(): Int =
+        context.packageManager.getInstalledPackages(0).size
+
     /** @throws Exception if the privileged call fails; the caller reports it rather than hiding it. */
     fun run(service: IPrivilegedService): VisibilityResult {
         val appVisible = context.packageManager

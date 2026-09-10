@@ -1,19 +1,39 @@
-package com.bulwark.app
+package com.bulwark.app.security
 
-import android.app.Application
+import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.os.Build
 import android.os.StrictMode
 
 /**
- * Process entry point. Its job today is to make Bulwark's central promise
- * fail loudly rather than quietly.
+ * Makes Bulwark's central promise fail loudly rather than quietly.
+ *
+ * ## Why this is not an Application subclass
+ *
+ * It was one, for a day, and it broke the entire privilege path.
+ *
+ * Shizuku launches the privileged user service in a stripped-down process.
+ * That process calls `LoadedApk.makeApplication()`, which tries to instantiate
+ * whatever `android:name` the manifest declares on `<application>` - and
+ * NPEs, because the process has no real application context to build one in:
+ *
+ *     java.lang.NullPointerException
+ *         at android.app.LoadedApk.makeApplicationInner(LoadedApk.java:1505)
+ *
+ * The failure surfaces as the service never binding, so the app sits on
+ * "connecting" forever with nothing in its own logs. The stack trace is under
+ * the `ShizukuServiceStarter` tag, not ours.
+ *
+ * **Do not add a custom Application class to this app** unless you have first
+ * proven the user service still binds on hardware. A debug-only convenience is
+ * not worth the feature the whole product is built on. See
+ * `context/_shared/security.md`.
  */
-class BulwarkApplication : Application() {
+object StrictModePolicy {
 
-    override fun onCreate() {
-        super.onCreate()
-        if (isDebuggable()) enableStrictMode()
+    /** Call from the main Activity. Debug builds only; no-op in release. */
+    fun installIfDebuggable(context: Context) {
+        if (isDebuggable(context)) enableStrictMode()
     }
 
     /**
@@ -65,6 +85,6 @@ class BulwarkApplication : Application() {
      * Read from the running app rather than `BuildConfig`, so this keeps
      * working regardless of whether the build-config feature is enabled.
      */
-    private fun isDebuggable(): Boolean =
-        applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+    private fun isDebuggable(context: Context): Boolean =
+        context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
 }

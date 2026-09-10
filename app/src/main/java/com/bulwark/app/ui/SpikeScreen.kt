@@ -63,6 +63,20 @@ fun SpikeScreen(
 
         Card { Column(Modifier.padding(14.dp)) { Text(describe(state)) } }
 
+        // Half the spike answer, and it needs no privilege at all. Shown
+        // unconditionally so a broken Shizuku path cannot hide it.
+        val appCount = remember { PackageVisibilityProbe(context).appVisibleCount() }
+        Card {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Packages visible to Bulwark itself: $appCount")
+                Text(
+                    "No Shizuku involved. Compare against `pm list packages` " +
+                        "run as shell - the difference is the answer.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+
         when (state) {
             is ShizukuState.Unavailable ->
                 Text(
