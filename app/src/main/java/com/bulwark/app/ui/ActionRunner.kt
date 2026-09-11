@@ -311,6 +311,18 @@ class ActionRunner(
      * That distinction is the layer's whole safety story: a rule is an intent,
      * and only a live tunnel makes it true.
      */
+    /**
+     * Raises Android's VPN consent dialogue, because the user asked.
+     *
+     * Separate from [syncFirewall] so that consent is something offered on a
+     * card and taken when wanted, rather than a dialogue that ambushes every
+     * app launch until it is accepted.
+     */
+    fun requestVpnConsent() {
+        val consent = Firewall.consentIntent(activity) ?: return
+        vpnConsent.launch(consent)
+    }
+
     /** The firewall's current rules. Read off the log, never cached. */
     fun blockedNetworkApps(): Set<String> = firewall.blocked()
 
@@ -323,11 +335,12 @@ class ActionRunner(
                 Firewall.stop(activity)
                 return@launch
             }
-            val consent = Firewall.consentIntent(activity)
-            if (consent != null) {
-                vpnConsent.launch(consent)
-                return@launch
-            }
+            // Consent is NOT raised here, deliberately. This runs on every
+            // screen load, and throwing Android's VPN dialogue at someone each
+            // time they open the app is the app demanding rather than offering.
+            // The card shows the state and a button; the dialogue appears when
+            // they ask for it.
+            if (Firewall.needsConsent(activity)) return@launch
             Firewall.sync(activity)
         }
     }

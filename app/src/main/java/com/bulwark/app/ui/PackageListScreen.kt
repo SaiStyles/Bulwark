@@ -59,6 +59,7 @@ import com.bulwark.app.permissions.AuditSummary
 import com.bulwark.app.permissions.RatFinding
 import com.bulwark.app.permissions.ratFindings
 import com.bulwark.app.firewall.Firewall
+import com.bulwark.app.firewall.FirewallState
 import com.bulwark.app.firewall.firewallDetail
 import com.bulwark.app.firewall.firewallHeadline
 import com.bulwark.app.firewall.firewallState
@@ -323,6 +324,7 @@ fun PackageListScreen(
                         onOpenVpnSettings = {
                             runCatching { context.startActivity(Firewall.vpnSettings()) }
                         },
+                        onAllow = { runner.requestVpnConsent() },
                     )
                 }
             }
@@ -522,6 +524,7 @@ private fun FirewallCard(
     vpnUp: Boolean,
     alwaysOn: Boolean,
     onOpenVpnSettings: () -> Unit,
+    onAllow: () -> Unit,
 ) {
     val state = firewallState(ruleCount, consentNeeded, vpnUp)
 
@@ -547,11 +550,22 @@ private fun FirewallCard(
             firewallDetail(state, lockdownOn = alwaysOn)?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = textColour)
             }
-            // The way to close the gap, next to the sentence describing it -
-            // not in a help page nobody opens. Bulwark cannot flip this itself;
-            // Android reserves it for the user, rightly.
-            if (!alwaysOn) {
-                TextButton(onClick = onOpenVpnSettings) { Text("Open VPN settings") }
+            // Each state offers the thing that state actually needs. The
+            // first version showed "Open VPN settings" while the card said
+            // "waiting for your permission" - and consent is not granted in
+            // settings, it is a dialogue Bulwark has to raise. A button that
+            // sends someone where they cannot do the thing is worse than no
+            // button.
+            when (state) {
+                FirewallState.NEEDS_CONSENT ->
+                    TextButton(onClick = onAllow) { Text("Allow Bulwark to run it") }
+                FirewallState.IN_FORCE, FirewallState.NOT_IN_FORCE ->
+                    if (!alwaysOn) {
+                        TextButton(onClick = onOpenVpnSettings) {
+                            Text("Open VPN settings")
+                        }
+                    }
+                FirewallState.NOTHING_BLOCKED -> Unit
             }
         }
     }
