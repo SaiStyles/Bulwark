@@ -29,12 +29,26 @@ class PackageActionsTest {
 
         override fun get(packageName: String, userId: Int): Int {
             reads += packageName
-            return states[packageName] ?: PackageState.ENABLED
+            val stored = states[packageName] ?: PackageState.ENABLED
+            return if (resolvesDefaultToEnabled && stored == PackageState.DEFAULT) {
+                PackageState.ENABLED
+            } else {
+                stored
+            }
         }
+
+        /** Packages the platform silently refuses to change, like SYSTEM_FIXED. */
+        var silentlyIgnores: Set<String> = emptySet()
+
+        /** The platform reports DEFAULT as ENABLED for anything shipped on. */
+        var resolvesDefaultToEnabled = false
 
         override fun set(packageName: String, state: Int, userId: Int, callingPackage: String) {
             if (failOnSet || packageName in failFor) error("Shizuku died")
             writes += Triple(packageName, state, callingPackage)
+            // Records the call and changes nothing - exactly what `pm revoke`
+            // does to a SYSTEM_FIXED permission on real hardware.
+            if (packageName in silentlyIgnores) return
             states[packageName] = state
         }
     }
@@ -255,6 +269,50 @@ class PackageActionsTest {
         assertEquals(
             "com.b must be untouched",
             PackageState.DISABLED_USER, state.states["com.b"],
+        )
+    }
+
+    @Test
+    fun `a change the platform silently ignores is reported as a failure`() {
+        // Found on hardware 2026-09-11: pm revoke on a SYSTEM_FIXED permission
+        // returns no error and changes nothing. A privileged call that returns
+        // without throwing has not necessarily done anything, and a package
+        // fixed by the vendor or by policy behaves the same way.
+        //
+        // Without the read-back, Bulwark would tell someone it switched an app
+        // off while the app kept running - and would write that lie into the
+        // log as a success.
+        val state = FakeState(mapOf("com.fixed.app" to PackageState.ENABLED))
+        state.silentlyIgnores = setOf("com.fixed.app")
+        val (act, log) = actions(state)
+
+        val thrown = runCatching { act.disable("com.fixed.app") }.exceptionOrNull()
+
+        assertTrue("must not report success", thrown != null)
+        assertTrue(
+            "must explain why: ${thrown!!.message}",
+            thrown.message!!.contains("did not apply"),
+        )
+        assertEquals("and the log must say it failed", Phase.FAILED, log.all().last().phase)
+        assertEquals(PackageState.ENABLED, state.states["com.fixed.app"])
+    }
+
+    @Test
+    fun `restoring to DEFAULT accepts ENABLED as the same thing`() {
+        // DEFAULT means "whatever the phone shipped with", so the platform
+        // reports a package that shipped enabled as ENABLED after a restore to
+        // DEFAULT. Treating that difference as a silent failure would report
+        // every such restore as broken.
+        val state = FakeState(mapOf("com.oem.bloat" to PackageState.DEFAULT))
+        state.resolvesDefaultToEnabled = true
+        val (act, log) = actions(state)
+
+        act.disable("com.oem.bloat")
+        act.switchBackOn("com.oem.bloat")
+
+        assertTrue(
+            "the restore must be recorded as a success",
+            log.all().last().phase == Phase.SUCCEEDED,
         )
     }
 

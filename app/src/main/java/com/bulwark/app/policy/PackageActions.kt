@@ -95,7 +95,37 @@ class PackageActions(
             previousState = previous,
         ) {
             state.set(packageName, PackageState.DISABLED_USER, userId, callingPackage)
+            confirmApplied(packageName, PackageState.DISABLED_USER, userId)
         }
+    }
+
+    /**
+     * Reads the state back and fails if the platform did not actually change it.
+     *
+     * **A privileged call that returns without throwing has not necessarily
+     * done anything.** Found on hardware 2026-09-11: `pm revoke` on a
+     * `SYSTEM_FIXED` permission returns no error and changes nothing. The same
+     * shape is possible here - a fixed or policy-controlled package where the
+     * set is accepted and quietly ignored.
+     *
+     * Without this, Bulwark would tell someone it switched an app off while the
+     * app kept running. That is the false sense of protection `safety-rules.md`
+     * calls worse than none, and it would be recorded in the log as a success,
+     * which makes the log wrong too.
+     *
+     * One extra binder read per action, which is nothing beside the action.
+     */
+    private fun confirmApplied(packageName: String, expected: Int, userId: Int) {
+        val actual = state.get(packageName, userId)
+        if (actual == expected) return
+        // DEFAULT is the platform saying "whatever I shipped with", so a
+        // restore that asked for DEFAULT and reads back as ENABLED did land.
+        if (expected == PackageState.DEFAULT && actual == PackageState.ENABLED) return
+        error(
+            "The system did not apply this. Asked for state $expected, " +
+                "it is still $actual. Some packages are fixed by the phone's " +
+                "maker or by policy and cannot be changed."
+        )
     }
 
     /**
@@ -116,12 +146,9 @@ class PackageActions(
             userId = userId,
             previousState = previousState,
         ) {
-            state.set(
-                packageName,
-                previousState ?: PackageState.DEFAULT,
-                userId,
-                callingPackage,
-            )
+            val target = previousState ?: PackageState.DEFAULT
+            state.set(packageName, target, userId, callingPackage)
+            confirmApplied(packageName, target, userId)
         }
     }
 
