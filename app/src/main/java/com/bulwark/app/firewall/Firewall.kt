@@ -87,10 +87,25 @@ object Firewall {
      * to avoid.
      */
     fun alwaysOnHoldsOurTunnel(context: Context): Boolean = runCatching {
-        val resolver = context.contentResolver
-        val app = android.provider.Settings.Secure.getString(resolver, ALWAYS_ON_APP)
-        val lockdown = android.provider.Settings.Secure.getString(resolver, ALWAYS_ON_LOCKDOWN)
-        app == context.packageName && lockdown == "1"
+        android.provider.Settings.Secure.getString(context.contentResolver, ALWAYS_ON_APP) ==
+            context.packageName
+    }.getOrDefault(false)
+
+    /**
+     * Whether "Block connections without VPN" is on. **A warning, not a goal.**
+     *
+     * This once required `lockdown == "1"` before Bulwark would call the reboot
+     * gap closed - which meant the app recommended the setting that takes a
+     * phone off the network. Lockdown denies every app the VPN does not carry,
+     * and this tunnel carries only the blocked ones.
+     *
+     * See `FirewallStatus.LOCKDOWN_WARNING`. Verified on a real phone the hard
+     * way, 2026-09-11.
+     */
+    fun lockdownIsOn(context: Context): Boolean = runCatching {
+        android.provider.Settings.Secure.getString(
+            context.contentResolver, ALWAYS_ON_LOCKDOWN,
+        ) == "1"
     }.getOrDefault(false)
 
     /** Android's VPN settings, where always-on lives. */

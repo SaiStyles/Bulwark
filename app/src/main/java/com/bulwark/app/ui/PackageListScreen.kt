@@ -127,6 +127,7 @@ fun PackageListScreen(
     var firewallConsentNeeded by remember { mutableStateOf(false) }
     var aVpnIsUp by remember { mutableStateOf(false) }
     var alwaysOn by remember { mutableStateOf(false) }
+    var lockdown by remember { mutableStateOf(false) }
     // Null means "could not tell", never "none" - see originLabelFor.
     var systemPackages by remember { mutableStateOf<Set<String>?>(null) }
     // Capabilities whose flag read has come back. Until a permission is in
@@ -259,6 +260,7 @@ fun PackageListScreen(
         firewallConsentNeeded = Firewall.needsConsent(context)
         aVpnIsUp = Firewall.ourTunnelIsUp()
         alwaysOn = Firewall.alwaysOnHoldsOurTunnel(context)
+        lockdown = Firewall.lockdownIsOn(context)
         if (rules.isNotEmpty()) runner.syncFirewall()
     }
 
@@ -321,6 +323,7 @@ fun PackageListScreen(
                         consentNeeded = firewallConsentNeeded,
                         vpnUp = aVpnIsUp,
                         alwaysOn = alwaysOn,
+                        lockdown = lockdown,
                         onOpenVpnSettings = {
                             runCatching { context.startActivity(Firewall.vpnSettings()) }
                         },
@@ -523,6 +526,7 @@ private fun FirewallCard(
     consentNeeded: Boolean,
     vpnUp: Boolean,
     alwaysOn: Boolean,
+    lockdown: Boolean,
     onOpenVpnSettings: () -> Unit,
     onAllow: () -> Unit,
 ) {
@@ -531,7 +535,9 @@ private fun FirewallCard(
     // Colour carries the state rather than decorating it. A firewall that is
     // working is ordinary and gets the ordinary card; one that is not is the
     // app failing to do what it said, and that earns the caution colour.
-    val working = state.isEnforcing
+    // Lockdown is never 'working', whatever the tunnel is doing: the phone
+    // is cut off and the card has to look like it.
+    val working = state.isEnforcing && !lockdown
     val colors =
         if (working) CardDefaults.cardColors()
         else CardDefaults.cardColors(containerColor = CautionBackground)
@@ -547,7 +553,7 @@ private fun FirewallCard(
             // lockdownOn is false until Bulwark can read it. Claiming the gap
             // is closed when it has not been checked would be the exact
             // failure this card exists to prevent.
-            firewallDetail(state, lockdownOn = alwaysOn)?.let {
+            firewallDetail(state, alwaysOn = alwaysOn, lockdown = lockdown)?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = textColour)
             }
             // Each state offers the thing that state actually needs. The
@@ -556,16 +562,17 @@ private fun FirewallCard(
             // settings, it is a dialogue Bulwark has to raise. A button that
             // sends someone where they cannot do the thing is worse than no
             // button.
-            when (state) {
-                FirewallState.NEEDS_CONSENT ->
-                    TextButton(onClick = onAllow) { Text("Allow Bulwark to run it") }
-                FirewallState.IN_FORCE, FirewallState.NOT_IN_FORCE ->
-                    if (!alwaysOn) {
-                        TextButton(onClick = onOpenVpnSettings) {
-                            Text("Open VPN settings")
-                        }
+            when {
+                // Outranks every other state: the phone is off the network and
+                // the only useful action is going and turning it off.
+                lockdown ->
+                    TextButton(onClick = onOpenVpnSettings) {
+                        Text("Open VPN settings and turn it off")
                     }
-                FirewallState.NOTHING_BLOCKED -> Unit
+                state == FirewallState.NEEDS_CONSENT ->
+                    TextButton(onClick = onAllow) { Text("Allow Bulwark to run it") }
+                state != FirewallState.NOTHING_BLOCKED && !alwaysOn ->
+                    TextButton(onClick = onOpenVpnSettings) { Text("Open VPN settings") }
             }
         }
     }

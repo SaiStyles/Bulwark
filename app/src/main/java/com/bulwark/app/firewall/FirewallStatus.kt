@@ -82,24 +82,57 @@ fun firewallHeadline(state: FirewallState, ruleCount: Int): String {
  * The reboot warning is attached to the **working** state on purpose. Warning
  * someone only once it has already lapsed is telling them after it mattered.
  */
-fun firewallDetail(state: FirewallState, lockdownOn: Boolean): String? = when (state) {
-    FirewallState.NOTHING_BLOCKED -> null
+fun firewallDetail(
+    state: FirewallState,
+    alwaysOn: Boolean,
+    lockdown: Boolean,
+): String? {
+    // Before anything else, in every state, because it is the one setting that
+    // can take a whole phone off the network.
+    if (lockdown) return LOCKDOWN_WARNING
 
-    FirewallState.NEEDS_CONSENT ->
-        "Android asks before any app may run a VPN. Bulwark's tunnel goes " +
-            "nowhere - blocked apps are routed into it and their traffic is " +
-            "dropped. No other app's traffic passes through Bulwark."
+    return when (state) {
+        FirewallState.NOTHING_BLOCKED -> null
 
-    FirewallState.NOT_IN_FORCE ->
-        "Rules are cleared whenever the phone restarts, and whenever Android " +
-            "stops the tunnel. These apps can reach the internet until it is " +
-            "running again."
+        FirewallState.NEEDS_CONSENT ->
+            "Android asks before any app may run a VPN. Bulwark's tunnel goes " +
+                "nowhere - blocked apps are routed into it and their traffic is " +
+                "dropped. No other app's traffic passes through Bulwark."
 
-    FirewallState.IN_FORCE -> if (lockdownOn) {
-        "Always-on VPN is on, so these apps stay blocked across restarts too."
-    } else {
-        "This stops them sending. It does not stop them collecting, and it " +
-            "lapses at every restart until Bulwark runs again. Turn on " +
-            "Always-on VPN in Settings to close that gap."
+        FirewallState.NOT_IN_FORCE ->
+            "Rules are cleared whenever the phone restarts, and whenever Android " +
+                "stops the tunnel. These apps can reach the internet until it is " +
+                "running again."
+
+        FirewallState.IN_FORCE -> if (alwaysOn) {
+            "Android starts the tunnel by itself, so these stay blocked across " +
+                "restarts too."
+        } else {
+            "This stops them sending. It does not stop them collecting, and it " +
+                "lapses at every restart until Bulwark runs again. Always-on VPN " +
+                "in Settings closes that gap - but leave Block connections " +
+                "without VPN switched OFF."
+        }
     }
 }
+
+/**
+ * The one sentence in this app that exists because Bulwark broke a phone.
+ *
+ * **Learned by doing it, 2026-09-11.** Bulwark recommended turning on "Block
+ * connections without VPN" to close the reboot gap. That was wrong in a way
+ * that is obvious once stated: lockdown denies every app the VPN does not
+ * carry, and this tunnel deliberately carries almost nobody. The two combine
+ * into the blocked app blocked and **every other app on the phone cut off**.
+ *
+ * `dumpsys connectivity` showed it exactly: lockdown filtering applied to every
+ * uid on the device except Bulwark's own.
+ *
+ * So the two settings are not a pair, and anything mentioning one must be
+ * explicit about the other. **Always-on is good. Lockdown is incompatible.**
+ */
+const val LOCKDOWN_WARNING: String =
+    "Block connections without VPN is on, and it does not work with per-app " +
+        "blocking: it cuts off every app Bulwark is not already blocking, " +
+        "which is all of them. Turn it off in Settings. Always-on VPN on its " +
+        "own is fine and worth having."

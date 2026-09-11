@@ -174,6 +174,11 @@ class ActionRunner(
         val steps = actions.restoreEverything() +
             permissions.restoreEverything() +
             firewall.restoreEverything()
+        // The rules live in the log, but the tunnel is a running thing that has
+        // to be told. Without this the rules were lifted and the tunnel kept
+        // enforcing the old ones - "put everything back" left the app blocked,
+        // which is Bulwark reporting a change it had not finished making.
+        syncFirewall()
         val failed = steps.filterNot { it.succeeded }
         when {
             steps.isEmpty() -> "Bulwark has not changed anything on this phone."
