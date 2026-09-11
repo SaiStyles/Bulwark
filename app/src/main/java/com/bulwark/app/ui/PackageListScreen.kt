@@ -58,6 +58,10 @@ import com.bulwark.app.permissions.AppAccess
 import com.bulwark.app.permissions.AuditSummary
 import com.bulwark.app.permissions.RatFinding
 import com.bulwark.app.permissions.ratFindings
+import com.bulwark.app.firewall.Firewall
+import com.bulwark.app.firewall.firewallDetail
+import com.bulwark.app.firewall.firewallHeadline
+import com.bulwark.app.firewall.firewallState
 import com.bulwark.app.permissions.PermissionAcrossApps
 import com.bulwark.app.permissions.PermissionHolding
 import com.bulwark.app.permissions.audit
@@ -118,6 +122,9 @@ fun PackageListScreen(
     // makes a cheap one stutter.
     var interrupted by remember { mutableStateOf<List<ActionRecord>>(emptyList()) }
     var permissionGroups by remember { mutableStateOf<List<PermissionAcrossApps>>(emptyList()) }
+    var blockedApps by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var firewallConsentNeeded by remember { mutableStateOf(false) }
+    var aVpnIsUp by remember { mutableStateOf(false) }
     // Null means "could not tell", never "none" - see originLabelFor.
     var systemPackages by remember { mutableStateOf<Set<String>?>(null) }
     // Capabilities whose flag read has come back. Until a permission is in
@@ -236,6 +243,22 @@ fun PackageListScreen(
         }
     }
 
+    // The firewall's state, read from the platform every time rather than
+    // remembered. Every interesting case is one where a remembered value would
+    // be wrong: the service was killed, consent was withdrawn, another VPN
+    // replaced ours, or the phone restarted and nothing has started yet.
+    //
+    // No Shizuku here on purpose - this is the layer that must work without it.
+    LaunchedEffect(reload) {
+        val rules = withContext(Dispatchers.IO) {
+            runCatching { runner.blockedNetworkApps() }.getOrDefault(emptySet())
+        }
+        blockedApps = rules
+        firewallConsentNeeded = Firewall.needsConsent(context)
+        aVpnIsUp = Firewall.ourTunnelIsUp()
+        if (rules.isNotEmpty()) runner.syncFirewall()
+    }
+
     // The cross-app permission view. Needs Shizuku: reading another app's
     // granted permissions is privileged, unlike the special-access audit above.
     //
@@ -282,6 +305,19 @@ fun PackageListScreen(
                     item(key = "access") {
                         CollapsibleAudit(a, s, accessUnavailable, ratSignals)
                     }
+                }
+            }
+
+            // Shown whenever there is anything to say, which is whenever a
+            // rule exists. A firewall that is not working must announce that
+            // where it is looked at, not in a settings page.
+            if (blockedApps.isNotEmpty()) {
+                item(key = "firewall") {
+                    FirewallCard(
+                        ruleCount = blockedApps.size,
+                        consentNeeded = firewallConsentNeeded,
+                        vpnUp = aVpnIsUp,
+                    )
                 }
             }
 
@@ -457,12 +493,49 @@ fun PackageListScreen(
             }
 
             items(shown, key = { it.packageName }) { entry ->
-                PackageRow(entry, runner, ::report)
+                PackageRow(entry, runner, entry.packageName in blockedApps, ::report)
             }
         }
       }
 
       SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
+    }
+}
+
+/**
+ * What the firewall is actually doing, as opposed to what was asked for.
+ *
+ * Reads all three facts fresh and says the true one. The state that matters is
+ * the uncomfortable one - rules exist and nothing is enforcing them - which
+ * happens after every restart and must never be softened into "paused".
+ */
+@Composable
+private fun FirewallCard(ruleCount: Int, consentNeeded: Boolean, vpnUp: Boolean) {
+    val state = firewallState(ruleCount, consentNeeded, vpnUp)
+
+    // Colour carries the state rather than decorating it. A firewall that is
+    // working is ordinary and gets the ordinary card; one that is not is the
+    // app failing to do what it said, and that earns the caution colour.
+    val working = state.isEnforcing
+    val colors =
+        if (working) CardDefaults.cardColors()
+        else CardDefaults.cardColors(containerColor = CautionBackground)
+    val textColour = if (working) Color.Unspecified else CautionText
+
+    Card(colors = colors) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                firewallHeadline(state, ruleCount),
+                style = MaterialTheme.typography.titleSmall,
+                color = textColour,
+            )
+            // lockdownOn is false until Bulwark can read it. Claiming the gap
+            // is closed when it has not been checked would be the exact
+            // failure this card exists to prevent.
+            firewallDetail(state, lockdownOn = false)?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = textColour)
+            }
+        }
     }
 }
 
@@ -574,6 +647,7 @@ private fun InterruptedCard(packages: List<String>) {
 private fun PackageRow(
     entry: CatalogEntry,
     runner: ActionRunner,
+    isBlocked: Boolean,
     onOutcome: (ActionRunner.Outcome) -> Unit,
 ) {
     var busy by remember(entry.packageName) { mutableStateOf(false) }
@@ -649,6 +723,36 @@ private fun PackageRow(
                             "Bulwark cannot uninstall yet."
                     )
                 }
+            }
+
+            // One app, one decision, same as everything else here. Blocking
+            // is offered for any app the guards allow - including ones Bulwark
+            // will not disable, because cutting an app off is a smaller act
+            // than switching it off and the never-remove list is applied
+            // separately in FirewallActions.
+            if (isBlocked) {
+                Reason("Blocked from the internet by Bulwark.")
+                OutlinedButton(
+                    enabled = !busy,
+                    onClick = {
+                        busy = true
+                        runner.allowNetwork(entry.packageName) {
+                            busy = false
+                            onOutcome(it)
+                        }
+                    },
+                ) { Text("Allow online") }
+            } else {
+                OutlinedButton(
+                    enabled = !busy,
+                    onClick = {
+                        busy = true
+                        runner.blockNetwork(entry.packageName) {
+                            busy = false
+                            onOutcome(it)
+                        }
+                    },
+                ) { Text("Block internet") }
             }
 
             TextButton(onClick = { showPermissions = !showPermissions }) {

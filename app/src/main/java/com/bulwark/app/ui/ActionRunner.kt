@@ -6,9 +6,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
 import com.bulwark.app.policy.ActionJournal
 import com.bulwark.app.policy.PackageActions
+import com.bulwark.app.firewall.Firewall
 import com.bulwark.app.permissions.batchRevokePrompt
 import com.bulwark.app.permissions.singleRevokePrompt
 import com.bulwark.app.permissions.wordsFor
+import com.bulwark.app.policy.FirewallActions
 import com.bulwark.app.policy.PermissionActions
 import com.bulwark.app.security.DestructiveActionGuard
 import kotlinx.coroutines.Dispatchers
@@ -55,6 +57,12 @@ class ActionRunner(
      * as the same class of defect as an overclaimed security property.
      */
     private val permissions: PermissionActions,
+    /**
+     * The firewall's rules. Held here because a rule change has to be followed
+     * by re-applying the tunnel, and the tunnel needs an Activity's consent
+     * before it can exist at all.
+     */
+    private val firewall: FirewallActions,
 ) {
 
     /** How an attempt ended, for the UI to report. */
@@ -66,6 +74,23 @@ class ActionRunner(
     }
 
     private var pending: (() -> Unit)? = null
+
+    /**
+     * Android's own VPN consent dialogue.
+     *
+     * Registered eagerly for the same reason as the credential launcher below:
+     * `registerForActivityResult` must happen before the Activity is STARTED.
+     *
+     * Consent is asked for **after** a rule is recorded, never before. The rule
+     * is the user's decision and is worth keeping even if they decline the
+     * tunnel - declining leaves Bulwark showing "set to block, not in force",
+     * which is true, rather than silently discarding what they asked for.
+     */
+    private val vpnConsent = activity.registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) syncFirewall()
+    }
 
     /**
      * Launcher for the API 26-28 keyguard fallback. Registered eagerly at
@@ -137,15 +162,18 @@ class ActionRunner(
      */
     fun restoreEverything(onOutcome: (Outcome) -> Unit) = authenticated(
         title = "Put everything back",
-        reason = "Undo every change Bulwark has made to this phone, returning " +
-            "each app and permission to the state it was in before.",
+        reason = "Undo every change Bulwark has made to this phone: apps " +
+            "switched back on, permissions given back, and every internet " +
+            "block lifted.",
         onOutcome = onOutcome,
     ) {
         // Both halves, one authentication, because putting everything back is
         // one intent to the person who pressed it. Apps first: a permission
         // grant against an app that is still switched off is the less useful
         // order to fail in.
-        val steps = actions.restoreEverything() + permissions.restoreEverything()
+        val steps = actions.restoreEverything() +
+            permissions.restoreEverything() +
+            firewall.restoreEverything()
         val failed = steps.filterNot { it.succeeded }
         when {
             steps.isEmpty() -> "Bulwark has not changed anything on this phone."
@@ -233,6 +261,72 @@ class ActionRunner(
                 }
             )
             else -> "Took $capability from $done app(s)."
+        }
+    }
+
+    /**
+     * Records that an app should be cut off, then applies it.
+     *
+     * Authenticated like every other change. Blocking is destructive in the
+     * sense that matters - it takes a capability away and an app may break -
+     * and `security.md` FIXED-11 applies here as everywhere: anything that can
+     * press Bulwark's buttons holds shell by proxy.
+     */
+    fun blockNetwork(
+        packageName: String,
+        onOutcome: (Outcome) -> Unit,
+    ) = authenticated(
+        title = "Block $packageName",
+        reason = "Stop $packageName reaching the internet. It keeps running " +
+            "and keeps its data; you can allow it again here.",
+        onOutcome = onOutcome,
+    ) {
+        firewall.block(packageName)
+        syncFirewall()
+        "Blocked $packageName from the internet."
+    }
+
+    /** Lets it online again. The undo for [blockNetwork]. */
+    fun allowNetwork(
+        packageName: String,
+        onOutcome: (Outcome) -> Unit,
+    ) = authenticated(
+        title = "Allow $packageName online",
+        reason = "Let $packageName reach the internet again.",
+        onOutcome = onOutcome,
+    ) {
+        firewall.allow(packageName)
+        syncFirewall()
+        "Allowed $packageName online again."
+    }
+
+    /**
+     * Brings the tunnel into line with the rules, asking for consent if needed.
+     *
+     * Safe to call from anywhere, including screen load - it reads the rules
+     * fresh and does nothing when there is nothing to enforce.
+     *
+     * **It never reports success.** Whether the rules are in force is answered
+     * by reading the platform (`Firewall.aVpnIsUp`), not by this having run.
+     * That distinction is the layer's whole safety story: a rule is an intent,
+     * and only a live tunnel makes it true.
+     */
+    /** The firewall's current rules. Read off the log, never cached. */
+    fun blockedNetworkApps(): Set<String> = firewall.blocked()
+
+    fun syncFirewall() {
+        activity.lifecycleScope.launch {
+            val rules = withContext(Dispatchers.IO) {
+                runCatching { firewall.blocked() }.getOrDefault(emptySet())
+            }
+            if (rules.isNotEmpty()) {
+                val consent = Firewall.consentIntent(activity)
+                if (consent != null) {
+                    vpnConsent.launch(consent)
+                    return@launch
+                }
+            }
+            Firewall.apply(activity, rules)
         }
     }
 

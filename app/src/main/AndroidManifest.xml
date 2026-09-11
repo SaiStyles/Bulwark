@@ -32,6 +32,34 @@
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 
     <!--
+        The firewall's tunnel. Note what is still NOT here: no INTERNET. Bulwark
+        runs a VpnService and holds no permission to reach the network itself,
+        which is exactly the shape this layer needs - blocked apps are routed
+        into a tunnel that goes nowhere, and Bulwark could not forward their
+        traffic if it wanted to.
+
+        BIND_VPN_SERVICE below is declared ON the service, not requested by us:
+        it says only the system may bind it. It grants Bulwark nothing.
+
+        The user still has to approve the VPN through Android's own dialogue
+        before a tunnel can be established. See context/layers/03-firewall.md.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
+<!--
+        NO ACCESS_NETWORK_STATE, and that is a decision rather than an
+        oversight. Reading "is a VPN up" from ConnectivityManager needs it, and
+        the no-network build check refused the build - correctly, since the
+        constraint is that Bulwark declares nothing network-shaped at all.
+
+        The check was not amended to let it through. The signal is available
+        without any permission: the service that owns the tunnel knows whether
+        it holds one, and every way that can go wrong - process killed, service
+        stopped, consent revoked, phone rebooted - resets it to "no" on its own.
+        See NetworkBlockService.isTunnelUp.
+    -->
+
+    <!--
         NO android:name here, deliberately. Shizuku starts the privileged user
         service in a stripped-down process that calls LoadedApk.makeApplication;
         a custom Application class NPEs there and the service never binds, with
@@ -79,6 +107,20 @@
             android:exported="true"
             android:multiprocess="false"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+        <!--
+            The tunnel that goes nowhere. android:permission means only the
+            system may bind this - no other app can start or drive Bulwark's
+            firewall.
+        -->
+        <service
+            android:name=".firewall.NetworkBlockService"
+            android:exported="false"
+            android:permission="android.permission.BIND_VPN_SERVICE">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+        </service>
+
     </application>
 
 </manifest>

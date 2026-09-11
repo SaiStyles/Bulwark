@@ -12,10 +12,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import com.bulwark.app.policy.ActionJournal
 import com.bulwark.app.policy.PackageActions
+import com.bulwark.app.policy.FirewallActions
 import com.bulwark.app.policy.PermissionActions
 import com.bulwark.app.policy.SqliteActionLog
 import com.bulwark.app.security.StrictModePolicy
 import com.bulwark.app.security.WindowHardening
+import com.bulwark.app.shizuku.PrivilegedPackages
 import com.bulwark.app.shizuku.ShizukuGateway
 import com.bulwark.app.ui.ActionRunner
 import com.bulwark.app.ui.LogExporter
@@ -49,6 +51,14 @@ class MainActivity : ComponentActivity() {
             actions = PackageActions(journal, packageName),
             journal = journal,
             permissions = PermissionActions(journal),
+            // System-ness from our own PackageManager, not the privileged one:
+            // the firewall is the layer that must work with Shizuku dead.
+            firewall = FirewallActions(journal) { name ->
+                runCatching {
+                    val flags = packageManager.getApplicationInfo(name, 0).flags
+                    PrivilegedPackages.isSystemFlags(flags)
+                }.getOrDefault(true) // Unknown means protected. Rule 6.
+            },
         )
         // From PackageManager rather than BuildConfig: no extra build feature,
         // and it reports the version actually installed, which is what a bug
