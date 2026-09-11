@@ -284,18 +284,33 @@ fun PackageListScreen(
                 // Rule 5: the record must be exportable in fact, not only in
                 // principle. Offered once there is something to export.
                 item(key = "export") {
-                    TextButton(onClick = {
-                        exporter.export { outcome ->
-                            notice = when (outcome) {
-                                is LogExporter.Outcome.Saved ->
-                                    "Saved to ${outcome.where}. It lists the apps " +
-                                        "you changed — check before sharing it."
-                                is LogExporter.Outcome.Failed ->
-                                    "Could not save. ${outcome.why}"
-                                LogExporter.Outcome.Cancelled -> null
+                    Column {
+                        TextButton(onClick = {
+                            exporter.export { outcome ->
+                                notice = when (outcome) {
+                                    is LogExporter.Outcome.Saved ->
+                                        "Saved to ${outcome.where}."
+                                    is LogExporter.Outcome.Failed ->
+                                        "Could not save. ${outcome.why}"
+                                    LogExporter.Outcome.Cancelled -> null
+                                }
                             }
-                        }
-                    }) { Text("Export what Bulwark changed") }
+                        }) { Text("Export what Bulwark changed") }
+                        // Warned BEFORE the picker, not after the file exists.
+                        // threat-model.md: for someone who has just switched off
+                        // monitoring software, a file naming it — sitting in
+                        // Downloads on a phone another person can reach — is the
+                        // discovery risk the whole detection section is about.
+                        // A warning after the save has already happened is not a
+                        // warning, it is a receipt.
+                        Text(
+                            "This file lists every app you changed, and it stays " +
+                                "wherever you save it. If someone else can reach " +
+                                "this phone, choose somewhere they cannot.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = CautionText,
+                        )
+                    }
                 }
             }
 
