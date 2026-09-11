@@ -104,10 +104,14 @@ fun ratFindings(
                 "You probably turned this on yourself, for Shizuku or for a " +
                     "computer."
             },
-            whatWouldWorry = "It is worth switching off when you are not using it. " +
-                "Anything that can reach it can pair with your phone and hold the " +
-                "same access Bulwark does. Nothing on this phone currently has " +
-                "screen control, which is the other half an attack would need.",
+            whatWouldWorry = "Anything that can reach it can pair with your phone " +
+                "and hold the same access Bulwark does. Nothing here currently has " +
+                "screen control, which is the other half an attack would need. " +
+                "Switching it off is the safer choice, and it has a cost worth " +
+                "knowing: Shizuku uses it to restart itself after a reboot, so you " +
+                "would have to turn it back on before using Bulwark again. Your " +
+                "call - leaving it on is a standing way in, turning it off is a " +
+                "step to repeat.",
         )
     }
 

@@ -108,16 +108,29 @@ class RatSignalsTest {
     }
 
     @Test
-    fun `debugging alone still says to switch it off`() {
+    fun `advice to switch debugging off states what it costs`() {
+        // We proved Shizuku self-starts after a reboot BECAUSE wireless
+        // debugging survives. Telling someone to switch it off without saying
+        // that is advice with an unstated cost, and the honesty rules forbid
+        // exactly that - the user is the one who gets to weigh it.
         val finding = ratFindings(
             setOf(DeviceSignal.WIRELESS_DEBUGGING_ON),
             emptyList(),
             shizukuRunning = false,
         ).single()
-        assertTrue(finding.whatWouldWorry.contains("switching off"))
+
+        assertTrue("must give the safer option", finding.whatWouldWorry.contains("Switching it off"))
+        assertTrue(
+            "must name the cost: ${finding.whatWouldWorry}",
+            finding.whatWouldWorry.contains("restart itself after a reboot"),
+        )
+        assertTrue(
+            "must leave the choice with the user",
+            finding.whatWouldWorry.contains("Your call"),
+        )
         assertTrue(
             "must say why this one is the milder case",
-            finding.whatWouldWorry.contains("Nothing on this phone currently has"),
+            finding.whatWouldWorry.contains("Nothing here currently has"),
         )
     }
 
