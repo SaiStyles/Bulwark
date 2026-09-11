@@ -67,12 +67,15 @@ import com.bulwark.app.permissions.PermissionAcrossApps
 import com.bulwark.app.permissions.PermissionHolding
 import com.bulwark.app.permissions.audit
 import com.bulwark.app.permissions.groupByPermission
+import com.bulwark.app.permissions.permissionAuditNotice
+import com.bulwark.app.permissions.permissionAuditState
 import com.bulwark.app.shizuku.RuntimePermissionAccess
 import com.bulwark.app.permissions.summarise
 import com.bulwark.app.shizuku.PrivilegedPackages
 import com.bulwark.app.shizuku.SpecialAccessReader
 import com.bulwark.app.shizuku.ShizukuState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -122,7 +125,10 @@ fun PackageListScreen(
     // refresh - invisible on a fast phone and exactly the kind of thing that
     // makes a cheap one stutter.
     var interrupted by remember { mutableStateOf<List<ActionRecord>>(emptyList()) }
-    var permissionGroups by remember { mutableStateOf<List<PermissionAcrossApps>>(emptyList()) }
+    // Null means no read has produced a list, which is NOT the same as a read
+    // that produced an empty one. The screen says something different for each.
+    var permissionGroups by remember { mutableStateOf<List<PermissionAcrossApps>?>(null) }
+    var permissionsReadFailed by remember { mutableStateOf(false) }
     var blockedApps by remember { mutableStateOf<Set<String>>(emptySet()) }
     var firewallConsentNeeded by remember { mutableStateOf(false) }
     var aVpnIsUp by remember { mutableStateOf(false) }
@@ -258,10 +264,30 @@ fun PackageListScreen(
         }
         blockedApps = rules
         firewallConsentNeeded = Firewall.needsConsent(context)
-        aVpnIsUp = Firewall.ourTunnelIsUp()
         alwaysOn = Firewall.alwaysOnHoldsOurTunnel(context)
         lockdown = Firewall.lockdownIsOn(context)
-        if (rules.isNotEmpty()) runner.syncFirewall()
+        aVpnIsUp = Firewall.ourTunnelIsUp()
+
+        if (rules.isEmpty()) return@LaunchedEffect
+        runner.syncFirewall()
+
+        // Read again while the tunnel comes up, because starting it is
+        // asynchronous: the service is told to start, reads the rules on its own
+        // thread, then establishes. A single read taken here lands before any of
+        // that and sticks, so the card would say "nothing is stopping them"
+        // while the block was working.
+        //
+        // Wrong in the safe direction, which is the dangerous kind of wrong for
+        // this card: it teaches people to distrust the one screen that has to be
+        // trusted, and the next time it says that truthfully they will shrug.
+        //
+        // Bounded, and it stops the moment the answer is yes. A tunnel that has
+        // not appeared in this long is genuinely not coming.
+        repeat(TUNNEL_CHECKS) {
+            if (aVpnIsUp) return@LaunchedEffect
+            delay(TUNNEL_CHECK_MS)
+            aVpnIsUp = Firewall.ourTunnelIsUp()
+        }
     }
 
     // The cross-app permission view. Needs Shizuku: reading another app's
@@ -271,7 +297,17 @@ fun PackageListScreen(
     // whether a row may be *offered*, which matters for the handful of rows a
     // user opens - not for the few thousand this sweep sees.
     LaunchedEffect(ready, reload) {
-        if (!ready) return@LaunchedEffect
+        if (!ready) {
+            // **Cleared, not kept.** Returning early here used to leave the
+            // previous list on screen, so a phone whose Shizuku had died went on
+            // showing permissions Bulwark could no longer verify. Data we cannot
+            // re-read is worse than no data: it is a claim with no source.
+            permissionGroups = null
+            systemPackages = null
+            permissionsReadFailed = false
+            refinedPermissions = emptySet()
+            return@LaunchedEffect
+        }
         val built = withContext(Dispatchers.IO) {
             runCatching {
                 val installed = PrivilegedPackages.listDetailed()
@@ -282,8 +318,9 @@ fun PackageListScreen(
                     installed.filter { it.isSystem }.map { it.packageName }.toSet()
             }.getOrNull()
         }
-        permissionGroups = built?.first.orEmpty()
+        permissionGroups = built?.first
         systemPackages = built?.second
+        permissionsReadFailed = built == null
         refinedPermissions = emptySet()
     }
 
@@ -335,10 +372,19 @@ fun PackageListScreen(
             // The cross-app permission view, below the special-access audit
             // because that one names the more dangerous accesses and needs no
             // privilege to do it.
-            if (permissionGroups.isNotEmpty()) {
-                item(key = "permissions") {
+            //
+            // **Always rendered.** It used to appear only when it had data, so
+            // the three different silences - no Shizuku, read failed, genuinely
+            // nothing - all looked identical to a section that had vanished.
+            item(key = "permissions") {
+                val auditState = permissionAuditState(
+                    shizukuReady = ready,
+                    readFailed = permissionsReadFailed,
+                    groups = permissionGroups,
+                )
                     PermissionAuditSection(
-                        groups = permissionGroups,
+                        groups = permissionGroups.orEmpty(),
+                        notice = permissionAuditNotice(auditState),
                         systemPackages = systemPackages,
                         refined = refinedPermissions,
                         onOpen = { permission ->
@@ -347,12 +393,12 @@ fun PackageListScreen(
                             if (permission !in refinedPermissions) scope.launch {
                                 val refreshed = withContext(Dispatchers.IO) {
                                     val group = permissionGroups
-                                        .firstOrNull { it.permission == permission }
+                                        ?.firstOrNull { it.permission == permission }
                                         ?: return@withContext null
                                     RuntimePermissionAccess.refineWithFlags(group.holders)
                                 }
                                 if (refreshed != null) {
-                                    permissionGroups = permissionGroups.map {
+                                    permissionGroups = permissionGroups?.map {
                                         if (it.permission == permission) {
                                             it.copy(holders = refreshed)
                                         } else {
@@ -374,7 +420,6 @@ fun PackageListScreen(
                             }
                         },
                     )
-                }
             }
 
             if (interrupted.isNotEmpty()) {
@@ -897,3 +942,13 @@ private fun Badge(entry: CatalogEntry) {
             .padding(horizontal = 6.dp, vertical = 2.dp),
     )
 }
+
+/**
+ * How long the screen waits for the tunnel before believing it is not coming.
+ *
+ * Ten checks over three seconds. Long enough for a service start, a log read and
+ * an `establish()` on a slow phone; short enough that a genuinely absent tunnel
+ * is reported promptly rather than hidden behind a spinner.
+ */
+private const val TUNNEL_CHECKS = 10
+private const val TUNNEL_CHECK_MS = 300L

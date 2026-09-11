@@ -550,4 +550,91 @@ class RuntimePermissionsTest {
             rows.single { it.permission.endsWith("COARSE_LOCATION") }.revocable(),
         )
     }
+
+    @Test
+    fun `the three silences are told apart`() {
+        // "Empty" meant three different things and the screen rendered nothing
+        // for all of them, so a section full yesterday was simply gone today.
+        val groups = listOf(
+            PermissionAcrossApps("android.permission.CAMERA", listOf(holding()))
+        )
+
+        assertEquals(
+            AuditState.NEEDS_SHIZUKU,
+            permissionAuditState(shizukuReady = false, readFailed = false, groups = null),
+        )
+        assertEquals(
+            AuditState.READ_FAILED,
+            permissionAuditState(shizukuReady = true, readFailed = true, groups = null),
+        )
+        assertEquals(
+            AuditState.NOTHING_HELD,
+            permissionAuditState(shizukuReady = true, readFailed = false, groups = emptyList()),
+        )
+        assertEquals(
+            AuditState.READY,
+            permissionAuditState(shizukuReady = true, readFailed = false, groups = groups),
+        )
+    }
+
+    @Test
+    fun `no read at all is never reported as nothing held`() {
+        // The distinction the whole fix rests on: a null list means nobody has
+        // looked, an empty list means someone looked and found none. Collapsing
+        // them tells a user their phone is clean when Bulwark simply cannot see.
+        assertEquals(
+            AuditState.READ_FAILED,
+            permissionAuditState(shizukuReady = true, readFailed = false, groups = null),
+        )
+    }
+
+    @Test
+    fun `missing Shizuku outranks everything, since nothing could be read`() {
+        // With no privilege there was no read, so "failed" and "nothing held"
+        // are both untrue and both misleading.
+        assertEquals(
+            AuditState.NEEDS_SHIZUKU,
+            permissionAuditState(shizukuReady = false, readFailed = true, groups = emptyList()),
+        )
+    }
+
+    @Test
+    fun `every silence explains itself, and a real list explains nothing`() {
+        assertNull("data needs no excuse", permissionAuditNotice(AuditState.READY))
+        AuditState.entries.filter { it != AuditState.READY }.forEach {
+            val notice = permissionAuditNotice(it)
+            assertNotNull("${it.name} must say something", notice)
+            assertTrue("${it.name} must be a sentence", notice!!.length > 40)
+        }
+    }
+
+    @Test
+    fun `the Shizuku notice says what is lost and what is not`() {
+        // Someone seeing this has a phone whose privilege is down. The thing
+        // they most need to know is that their existing changes still stand.
+        val notice = permissionAuditNotice(AuditState.NEEDS_SHIZUKU)!!
+        assertTrue(notice, notice.contains("Start Shizuku"))
+        assertTrue(notice, notice.contains("stays changed"))
+        assertTrue("it must not guess: $notice", notice.contains("will not guess"))
+    }
+
+    @Test
+    fun `an empty phone is offered as surprising rather than as good news`() {
+        // "No app holds anything" is far more likely to be a broken read than a
+        // clean phone, and a reassuring sentence there would be the worst kind
+        // of wrong.
+        val notice = permissionAuditNotice(AuditState.NOTHING_HELD)!!
+        assertTrue(notice, notice.contains("unusual"))
+        listOf("you are safe", "nothing to worry", "all clear").forEach {
+            assertTrue("must not reassure with \"$it\": $notice",
+                !notice.contains(it, ignoreCase = true))
+        }
+    }
+
+    @Test
+    fun `a failed read warns that anything on screen is out of date`() {
+        val notice = permissionAuditNotice(AuditState.READ_FAILED)!!
+        assertTrue(notice, notice.contains("not the same as"))
+        assertTrue(notice, notice.contains("out of date"))
+    }
 }

@@ -62,6 +62,14 @@ import com.bulwark.app.ui.theme.Incomplete
 @Composable
 fun PermissionAuditSection(
     groups: List<PermissionAcrossApps>,
+    /**
+     * Said instead of the list when there is no list. Null when there is one.
+     *
+     * The section used to be hidden entirely whenever `groups` was empty, so a
+     * view that was full yesterday was simply gone today - and an absence
+     * reads as an answer. See `permissionAuditNotice`.
+     */
+    notice: String?,
     /** Packages that came with the phone. Absent means Bulwark could not tell. */
     systemPackages: Set<String>?,
     /** Asks for the expensive flag read for one group, once it is opened. */
@@ -90,14 +98,9 @@ fun PermissionAuditSection(
                 color = Incomplete,
             )
 
-            if (groups.isEmpty()) {
+            if (notice != null) {
                 Spacer()
-                Text(
-                    // Not "no apps have permissions" - that would be a claim.
-                    "Nothing to show yet.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Incomplete,
-                )
+                Text(notice, style = MaterialTheme.typography.bodySmall, color = Incomplete)
                 return@Column
             }
 

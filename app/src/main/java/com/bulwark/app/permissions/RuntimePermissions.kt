@@ -640,3 +640,77 @@ fun heldByApp(holdings: List<PermissionHolding>): List<PermissionHolding> =
     markImplied(holdings)
         .filter { it.isGranted && it.isRuntime == true }
         .sortedWith(compareBy({ attentionRank(it.permission) }, { it.permission }))
+
+/**
+ * Why the cross-app permission view has nothing to show.
+ *
+ * "Empty" means three different things and they need different sentences. The
+ * screen used to render nothing at all in every one of them, so a section that
+ * was full yesterday was simply absent today - and an absence reads as an
+ * answer. Someone concludes the feature broke, or worse, that nothing on their
+ * phone holds anything.
+ *
+ * Same shape as `Revocable` and `FirewallState`: the reason travels with the
+ * state instead of being re-derived by whoever draws the screen.
+ */
+enum class AuditState {
+    /** Real data. Nothing to explain. */
+    READY,
+
+    /**
+     * Reading another app's permissions is privileged, so this view is blank
+     * without Shizuku. The special-access audit is not - three of its four
+     * sources need no privilege - which is why that one still says something.
+     */
+    NEEDS_SHIZUKU,
+
+    /** Privileged, and the read failed anyway. Different fact, different fix. */
+    READ_FAILED,
+
+    /** Read fine, and genuinely nothing holds a runtime permission. */
+    NOTHING_HELD,
+}
+
+/**
+ * Works out which of the three silences this is.
+ *
+ * @param groups null when no read has produced a list - not the same as a read
+ *   that produced an empty one.
+ */
+fun permissionAuditState(
+    shizukuReady: Boolean,
+    readFailed: Boolean,
+    groups: List<PermissionAcrossApps>?,
+): AuditState = when {
+    !shizukuReady -> AuditState.NEEDS_SHIZUKU
+    readFailed -> AuditState.READ_FAILED
+    groups == null -> AuditState.READ_FAILED
+    groups.isEmpty() -> AuditState.NOTHING_HELD
+    else -> AuditState.READY
+}
+
+/**
+ * What to say instead of the list. Null when there is a list to show.
+ *
+ * [AuditState.NOTHING_HELD] gets a sentence rather than an empty card on
+ * purpose: "nothing holds these" is a genuine and slightly surprising finding,
+ * and leaving the space blank would let it read as a failure.
+ */
+fun permissionAuditNotice(state: AuditState): String? = when (state) {
+    AuditState.READY -> null
+
+    AuditState.NEEDS_SHIZUKU ->
+        "Start Shizuku to see this. Reading another app's permissions needs " +
+            "the access Shizuku provides - without it Bulwark cannot tell you " +
+            "who holds what, and will not guess. Anything you have already " +
+            "changed stays changed."
+
+    AuditState.READ_FAILED ->
+        "Bulwark could not read permissions this time. This is not the same as " +
+            "finding nothing - try again, and treat anything shown here as out " +
+            "of date until it works."
+
+    AuditState.NOTHING_HELD ->
+        "No app on this phone holds a permission you can decide about. That is " +
+            "unusual, so treat it as worth a second look rather than good news."
+}
