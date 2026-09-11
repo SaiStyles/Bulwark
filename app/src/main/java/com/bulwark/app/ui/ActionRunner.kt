@@ -7,6 +7,7 @@ import androidx.lifecycle.lifecycleScope
 import com.bulwark.app.policy.ActionJournal
 import com.bulwark.app.policy.PackageActions
 import com.bulwark.app.permissions.batchRevokePrompt
+import com.bulwark.app.permissions.singleRevokePrompt
 import com.bulwark.app.permissions.wordsFor
 import com.bulwark.app.policy.PermissionActions
 import com.bulwark.app.security.DestructiveActionGuard
@@ -162,6 +163,27 @@ class ActionRunner(
                 }
             )
         }
+    }
+
+    /**
+     * Authenticates, then takes one permission away from one app.
+     *
+     * The per-app view's action. Separate from [revokeAcrossApps] so the
+     * system prompt can say "Take Camera away from com.example" rather than
+     * describing a batch of one - the prompt is the channel an attacker cannot
+     * rewrite, so it should read like the thing the user actually did.
+     */
+    fun revokePermission(
+        packageName: String,
+        permission: String,
+        onOutcome: (Outcome) -> Unit,
+    ) = authenticated(
+        title = "Take away ${wordsFor(permission).name}",
+        reason = singleRevokePrompt(permission, packageName),
+        onOutcome = onOutcome,
+    ) {
+        permissions.revoke(packageName, permission)
+        "Took ${wordsFor(permission).name.lowercase()} away from $packageName."
     }
 
     /**

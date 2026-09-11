@@ -461,4 +461,93 @@ class RuntimePermissionsTest {
             holdings.single { it.packageName == "com.b" }.revocable(),
         )
     }
+
+    @Test
+    fun `the single-app prompt names the capability and the app`() {
+        // The per-app twin of the batch prompt. It exists rather than reusing
+        // that one because "from 1 app: com.example" reads like a batch that
+        // happens to be small, and someone acting on one app should see a
+        // sentence about that app.
+        val prompt = singleRevokePrompt("android.permission.RECORD_AUDIO", "com.example.app")
+
+        assertTrue(prompt, prompt.contains("Microphone"))
+        assertTrue(prompt, prompt.contains("com.example.app"))
+        assertTrue("no batch language: $prompt", !prompt.contains("1 app"))
+    }
+
+    @Test
+    fun `the summary counts what is held against what is asked for`() {
+        // Both numbers say different things, and the second is the telling one
+        // for an app that was denied and kept asking.
+        val holdings = listOf(
+            holding(permission = "android.permission.CAMERA"),
+            holding(permission = "android.permission.RECORD_AUDIO", granted = false),
+            holding(permission = "android.permission.READ_CONTACTS", granted = false),
+        )
+        assertEquals("Holds 1 of the 3 permissions it asks for.", appPermissionSummary(holdings))
+    }
+
+    @Test
+    fun `the summary does not count what nobody can decide about`() {
+        val holdings = listOf(
+            holding(permission = "android.permission.CAMERA"),
+            holding(permission = "android.permission.INTERNET", runtime = false),
+            holding(permission = "com.oem.MYSTERY", runtime = null),
+        )
+        assertEquals("Holds 1 of the 1 permissions it asks for.", appPermissionSummary(holdings))
+    }
+
+    @Test
+    fun `an app holding nothing says so rather than showing an empty list`() {
+        val holdings = listOf(holding(permission = "android.permission.CAMERA", granted = false))
+        assertTrue(
+            appPermissionSummary(holdings),
+            appPermissionSummary(holdings).contains("none of the 1"),
+        )
+        assertTrue(heldByApp(holdings).isEmpty())
+    }
+
+    @Test
+    fun `an app asking for nothing decidable says that instead of zero of zero`() {
+        val holdings = listOf(holding(permission = "android.permission.INTERNET", runtime = false))
+        assertTrue(
+            appPermissionSummary(holdings),
+            appPermissionSummary(holdings).contains("asks for none"),
+        )
+    }
+
+    @Test
+    fun `the app's rows are what it holds, loudest first`() {
+        val holdings = listOf(
+            holding(permission = "android.permission.ACTIVITY_RECOGNITION"),
+            holding(permission = "android.permission.RECORD_AUDIO"),
+            holding(permission = "android.permission.CAMERA", granted = false),
+            holding(permission = "android.permission.INTERNET", runtime = false),
+        )
+
+        assertEquals(
+            listOf(
+                "android.permission.RECORD_AUDIO",
+                "android.permission.ACTIVITY_RECOGNITION",
+            ),
+            heldByApp(holdings).map { it.permission },
+        )
+    }
+
+    @Test
+    fun `the app's rows carry the implication refusal too`() {
+        // The per-app view must not offer what the cross-app view refuses:
+        // taking approximate location from an app that holds precise changes
+        // nothing, wherever the button is drawn.
+        val rows = heldByApp(
+            listOf(
+                holding(permission = "android.permission.ACCESS_FINE_LOCATION"),
+                holding(permission = "android.permission.ACCESS_COARSE_LOCATION"),
+            )
+        )
+        assertEquals(
+            Revocable.IMPLIED_BY_ANOTHER,
+            rows.single { it.permission.endsWith("COARSE_LOCATION") }.revocable(),
+        )
+    }
 }

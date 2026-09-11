@@ -590,3 +590,53 @@ fun markImplied(holdings: List<PermissionHolding>): List<PermissionHolding> {
         if (implier in alsoHeld) holding.copy(impliedBy = implier) else holding
     }
 }
+
+
+/**
+ * What the system's authentication prompt says for a single revoke.
+ *
+ * The per-app twin of [batchRevokePrompt], and it exists rather than reusing
+ * that one because "from 1 app: com.example" reads like a batch that happens
+ * to be small. Someone acting on one app should see a sentence about that app.
+ *
+ * Same two obligations as the batch: name the capability, name what it applies
+ * to, in the one channel a hostile accessibility service cannot rewrite.
+ */
+fun singleRevokePrompt(permission: String, packageName: String): String =
+    "Take ${wordsFor(permission).name} away from $packageName."
+
+/**
+ * The line under "What it can do": how much of what it asks for it has.
+ *
+ * Both numbers matter and they say different things. The first is capability
+ * the app holds right now. The second is what it *wants*, which is the more
+ * telling number for an app that was denied and kept asking - and it is the
+ * reason this says "of the N it asks for" rather than quietly hiding the
+ * denied ones.
+ *
+ * Counts runtime permissions only, matching what the rows below it show.
+ */
+fun appPermissionSummary(holdings: List<PermissionHolding>): String {
+    val runtime = holdings.filter { it.isRuntime == true }
+    val held = runtime.count { it.isGranted }
+    return when {
+        runtime.isEmpty() ->
+            "This app asks for none of the permissions you can decide about."
+        held == 0 ->
+            "Holds none of the ${runtime.size} permissions it asks for."
+        else ->
+            "Holds $held of the ${runtime.size} permissions it asks for."
+    }
+}
+
+/**
+ * The rows for one app: what it holds, loudest first.
+ *
+ * Granted only. "What can this app do to me" is answered by what it has, and
+ * a list padded with things it was refused buries the answer - the count above
+ * already says how many those are.
+ */
+fun heldByApp(holdings: List<PermissionHolding>): List<PermissionHolding> =
+    markImplied(holdings)
+        .filter { it.isGranted && it.isRuntime == true }
+        .sortedWith(compareBy({ attentionRank(it.permission) }, { it.permission }))

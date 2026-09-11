@@ -59,6 +59,7 @@ import com.bulwark.app.permissions.AuditSummary
 import com.bulwark.app.permissions.RatFinding
 import com.bulwark.app.permissions.ratFindings
 import com.bulwark.app.permissions.PermissionAcrossApps
+import com.bulwark.app.permissions.PermissionHolding
 import com.bulwark.app.permissions.audit
 import com.bulwark.app.permissions.groupByPermission
 import com.bulwark.app.shizuku.RuntimePermissionAccess
@@ -577,6 +578,39 @@ private fun PackageRow(
 ) {
     var busy by remember(entry.packageName) { mutableStateOf(false) }
 
+    // The per-app permission view, folded away until asked for. Closed by
+    // default because reading one app's permissions costs a binder call per
+    // permission, and a list of 371 rows must not pay that for all of them.
+    val context = LocalContext.current
+    // rememberSaveable, not remember: a row scrolled out of a LazyColumn leaves
+    // composition, and plain remember would quietly fold the section back up
+    // while the user was still reading the list. Only the toggle is saved -
+    // the holdings are re-read, because what the phone says may have changed
+    // in between and a stale list is worse than a brief "Reading...".
+    var showPermissions by rememberSaveable(entry.packageName) { mutableStateOf(false) }
+    var holdings by remember(entry.packageName) { mutableStateOf<List<PermissionHolding>?>(null) }
+    var permissionFailure by remember(entry.packageName) { mutableStateOf<String?>(null) }
+    var busyPermission by remember(entry.packageName) { mutableStateOf<String?>(null) }
+    var permissionReload by remember(entry.packageName) { mutableIntStateOf(0) }
+
+    LaunchedEffect(showPermissions, permissionReload) {
+        if (!showPermissions) return@LaunchedEffect
+        holdings = null
+        permissionFailure = null
+        runCatching {
+            withContext(Dispatchers.IO) {
+                RuntimePermissionAccess.forApp(
+                    entry.packageName, entry.isSystem, context.packageManager,
+                )
+            }
+        }.fold(
+            onSuccess = { holdings = it },
+            // Reported, never swallowed into an empty list: "could not read"
+            // and "holds nothing" are different facts about someone's phone.
+            onFailure = { permissionFailure = "${it::class.java.simpleName}: ${it.message}" },
+        )
+    }
+
     Card {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -615,6 +649,31 @@ private fun PackageRow(
                             "Bulwark cannot uninstall yet."
                     )
                 }
+            }
+
+            TextButton(onClick = { showPermissions = !showPermissions }) {
+                Text(if (showPermissions) "Hide what it can do" else "What it can do")
+            }
+
+            if (showPermissions) {
+                AppPermissionsSection(
+                    packageName = entry.packageName,
+                    holdings = holdings,
+                    failure = permissionFailure,
+                    busyPermission = busyPermission,
+                    onRevoke = { permission ->
+                        busyPermission = permission
+                        runner.revokePermission(entry.packageName, permission) { outcome ->
+                            busyPermission = null
+                            onOutcome(outcome)
+                            // Re-read rather than assume. The screen must show
+                            // what the phone says, not what was asked for - a
+                            // revoke the platform ignored has to come back
+                            // looking ignored.
+                            permissionReload++
+                        }
+                    },
+                )
             }
 
             if (entry.neededByInstalled.isNotEmpty()) {

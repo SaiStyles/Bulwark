@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.content.pm.PermissionInfo
 import android.os.Build
 import com.bulwark.app.permissions.PermissionHolding
+import com.bulwark.app.permissions.markImplied
 import rikka.shizuku.ShizukuBinderWrapper
 import rikka.shizuku.SystemServiceHelper
 
@@ -409,6 +410,35 @@ internal object RuntimePermissionAccess {
         runCatching {
             holding.copy(flags = flags(holding.packageName, holding.permission, userId))
         }.getOrNull()
+    }
+
+    /**
+     * Everything one app holds, ready for the screen to render.
+     *
+     * The per-app view's loader. Unlike [sweep] this **does** pay for flags:
+     * one app is a handful of calls, and every row here is one the user may be
+     * about to act on, so offerability has to be known before anything is
+     * drawn.
+     *
+     * Returns holdings already marked with both refusals the screen must
+     * respect - the never-remove list, and one permission implying another -
+     * so the composable renders answers rather than working them out.
+     *
+     * @param isSystem from the privileged enumeration the caller already has.
+     *   It decides whether the never-remove list's structural fragments apply,
+     *   and asking the platform again for something the caller knows is a
+     *   binder call for nothing.
+     */
+    fun forApp(
+        packageName: String,
+        isSystem: Boolean,
+        ownPackageManager: PackageManager,
+        userId: Int = 0,
+    ): List<PermissionHolding> {
+        val protectedApp = ProtectedPackages.isProtected(packageName, isSystem)
+        val raw = holdings(packageName, ownPackageManager, userId, withFlags = true)
+            .map { it.copy(isProtected = protectedApp) }
+        return markImplied(raw)
     }
 
     /**
