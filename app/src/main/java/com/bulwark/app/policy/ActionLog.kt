@@ -83,6 +83,19 @@ enum class ActionKind {
 
     /** `grantRuntimePermission` - the undo for [REVOKE_PERMISSION]. */
     GRANT_PERMISSION,
+
+    /**
+     * Cut one app off from the network.
+     *
+     * Unlike every other kind here, this one changes **no system state**. It
+     * records an intent, and the firewall enforces it while it is running. The
+     * consequence is that the log is the *only* record - there is nothing to
+     * read back off the platform tomorrow to find out what the user wanted.
+     */
+    BLOCK_NETWORK,
+
+    /** Let it reach the network again. The undo for [BLOCK_NETWORK]. */
+    ALLOW_NETWORK,
     ;
 
     /**
@@ -102,11 +115,18 @@ enum class ActionKind {
             INSTALL_EXISTING -> UNINSTALL
             REVOKE_PERMISSION -> GRANT_PERMISSION
             GRANT_PERMISSION -> REVOKE_PERMISSION
+            BLOCK_NETWORK -> ALLOW_NETWORK
+            ALLOW_NETWORK -> BLOCK_NETWORK
         }
 
     /** True when this takes a capability away rather than giving it back. */
     val isDestructive: Boolean
-        get() = this == DISABLE || this == UNINSTALL || this == REVOKE_PERMISSION
+        get() = this == DISABLE || this == UNINSTALL || this == REVOKE_PERMISSION ||
+            this == BLOCK_NETWORK
+
+    /** True when this action is about the firewall rather than system state. */
+    val isNetworkRule: Boolean
+        get() = this == BLOCK_NETWORK || this == ALLOW_NETWORK
 
     /** True when this action is about one permission rather than a whole app. */
     val isPermissionChange: Boolean
@@ -227,4 +247,30 @@ fun List<ActionRecord>.undoPlan(): List<NewEntry> {
             permission = attempt.permission,
         )
     }
+}
+
+/**
+ * The apps the user has asked the firewall to cut off, as of now.
+ *
+ * Derived from the log rather than stored separately, which is the whole
+ * reason the firewall needed no new storage: the record, the undo and "put
+ * everything back" all come free, and there is no second copy of the truth to
+ * drift from the first.
+ *
+ * Only [Phase.SUCCEEDED] entries count. An attempt with no outcome is
+ * [unfinished] and means Bulwark does not know what happened - and a firewall
+ * rule Bulwark is unsure about must not be treated as in force, because the
+ * screen would then claim a protection nobody can vouch for.
+ *
+ * Last write wins per package, which is what makes block-then-allow leave
+ * nothing behind.
+ *
+ * Pure, so the set the tunnel is built from is tested without a device.
+ */
+fun List<ActionRecord>.blockedPackages(): Set<String> {
+    val closed = filter { it.phase == Phase.SUCCEEDED }.mapNotNull { it.attemptId }.toSet()
+    val decided = mutableMapOf<String, ActionKind>()
+    filter { it.phase == Phase.ATTEMPTED && it.id in closed && it.kind.isNetworkRule }
+        .forEach { decided[it.packageName] = it.kind }
+    return decided.filterValues { it == ActionKind.BLOCK_NETWORK }.keys
 }

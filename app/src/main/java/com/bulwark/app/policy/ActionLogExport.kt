@@ -125,6 +125,11 @@ internal val ActionKind.humanVerb: String
         // com.example  Microphone" rather than naming a mechanism.
         ActionKind.REVOKE_PERMISSION -> "took away"
         ActionKind.GRANT_PERMISSION -> "gave back"
+        // Said as what the user asked for, not as what the tunnel did. These
+        // record an intent; whether it was in force at any given moment is a
+        // different question and the log must not imply it answers that one.
+        ActionKind.BLOCK_NETWORK -> "blocked online"
+        ActionKind.ALLOW_NETWORK -> "allowed online"
     }
 
 /** Reads as a status, not as an enum constant. */
