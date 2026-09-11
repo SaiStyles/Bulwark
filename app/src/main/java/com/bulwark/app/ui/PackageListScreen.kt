@@ -33,6 +33,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import com.bulwark.app.ui.theme.CautionBackground
+import com.bulwark.app.ui.theme.CautionText
+import com.bulwark.app.ui.theme.Incomplete
+import com.bulwark.app.ui.theme.RatingAdvanced
+import com.bulwark.app.ui.theme.RatingExpert
+import com.bulwark.app.ui.theme.RatingRecommended
+import com.bulwark.app.ui.theme.RatingUnsafe
+import com.bulwark.app.ui.theme.Refused
+import com.bulwark.app.ui.theme.WorthLookingAt
 import com.bulwark.app.debloat.CatalogEntry
 import com.bulwark.app.debloat.PackageCatalog
 import com.bulwark.app.debloat.RemovalRating
@@ -256,26 +265,26 @@ private fun InterruptedCard(packages: List<String>) {
     // safety-rules.md rule 6: on ambiguity, stop and report. Bulwark does not
     // know whether these applied and will not guess, so it says exactly that
     // rather than quietly "fixing" a change that may never have happened.
-    Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0))) {
+    Card(colors = CardDefaults.cardColors(containerColor = CautionBackground)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 "Bulwark was interrupted",
                 style = MaterialTheme.typography.titleSmall,
-                color = Color(0xFF7A3E00),
+                color = CautionText,
             )
             Text(
                 "It was part-way through changing ${packages.size} app(s) and " +
                     "never recorded finishing. They may or may not have applied " +
                     "- Bulwark does not know, and will not guess. Check each one:",
                 style = MaterialTheme.typography.bodySmall,
-                color = Color(0xFF7A3E00),
+                color = CautionText,
             )
             packages.forEach {
                 Text(
                     it,
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = FontFamily.Monospace,
-                    color = Color(0xFF7A3E00),
+                    color = CautionText,
                 )
             }
         }
@@ -397,15 +406,15 @@ private fun Reason(text: String) {
 @Composable
 private fun Badge(entry: CatalogEntry) {
     val (label, colour) = when {
-        entry.options.isRefused -> "LOCKED" to Color(0xFF1565C0)
+        entry.options.isRefused -> "LOCKED" to Refused
         // UAD's own word, not ours. "SAFE" was Bulwark promising nothing
         // would change; Recommended only means most people can remove it.
         // com.google.android.as.oss is rated Recommended and is a dependency
         // of System Intelligence - both true at once.
-        entry.rating == RemovalRating.RECOMMENDED -> "RECOMMENDED" to Color(0xFF2E7D32)
-        entry.rating == RemovalRating.ADVANCED -> "CARE" to Color(0xFFE65100)
-        entry.rating == RemovalRating.EXPERT -> "EXPERT" to Color(0xFF6A1B9A)
-        entry.rating == RemovalRating.UNSAFE -> "RISKY" to Color(0xFFB71C1C)
+        entry.rating == RemovalRating.RECOMMENDED -> "RECOMMENDED" to RatingRecommended
+        entry.rating == RemovalRating.ADVANCED -> "CARE" to RatingAdvanced
+        entry.rating == RemovalRating.EXPERT -> "EXPERT" to RatingExpert
+        entry.rating == RemovalRating.UNSAFE -> "RISKY" to RatingUnsafe
         else -> "UNKNOWN" to Color.Gray
     }
     Text(

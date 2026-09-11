@@ -1,5 +1,6 @@
 package com.bulwark.app.shizuku
 
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
 
@@ -73,6 +74,22 @@ object PrivilegedPackages {
         return list
     }
 
+    /**
+     * Whether `ApplicationInfo.flags` describe a package that shipped with the
+     * phone.
+     *
+     * **One home for this rule.** It was written out three times with the
+     * constants inlined as `1` and `128`, which made a policy decision look
+     * like arithmetic and meant changing it required finding all three.
+     *
+     * `FLAG_UPDATED_SYSTEM_APP` is the half people forget: a system app that
+     * took a Play Store update is still a system app, and treating it as
+     * user-installed would quietly widen what Bulwark offers to remove.
+     */
+    fun isSystemFlags(flags: Int): Boolean =
+        (flags and ApplicationInfo.FLAG_SYSTEM) != 0 ||
+            (flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+
     /** One installed package, with the little we need to classify it. */
     data class Installed(
         val packageName: String,
@@ -105,11 +122,7 @@ object PrivilegedPackages {
             val flags = appInfo?.let {
                 it.javaClass.getField("flags").getInt(it)
             } ?: 0
-            // FLAG_SYSTEM (1) or FLAG_UPDATED_SYSTEM_APP (128). The second
-            // matters: a system app that received a Play update is still a
-            // system app, and treating it as user-installed would quietly
-            // widen what we offer to remove.
-            val isSystem = (flags and 1) != 0 || (flags and 128) != 0
+            val isSystem = isSystemFlags(flags)
             // ApplicationInfo.enabled is public SDK and already in hand from
             // the privileged enumeration, so this costs no extra binder call.
             val isEnabled = appInfo?.let {
@@ -148,8 +161,7 @@ object PrivilegedPackages {
             )
         } ?: error("getApplicationInfo returned null for $packageName")
 
-        val flags = appInfo.javaClass.getField("flags").getInt(appInfo)
-        (flags and 1) != 0 || (flags and 128) != 0
+        isSystemFlags(appInfo.javaClass.getField("flags").getInt(appInfo))
     } catch (_: Throwable) {
         true
     }

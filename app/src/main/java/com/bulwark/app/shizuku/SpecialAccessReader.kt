@@ -70,9 +70,7 @@ object SpecialAccessReader {
         return try {
             @Suppress("DEPRECATION")
             val info = context.packageManager.getApplicationInfo(packageName, 0)
-            // FLAG_SYSTEM or FLAG_UPDATED_SYSTEM_APP - a system app that took
-            // a Play update is still a system app.
-            (info.flags and 1) != 0 || (info.flags and 128) != 0
+            PrivilegedPackages.isSystemFlags(info.flags)
         } catch (_: Throwable) {
             null
         }

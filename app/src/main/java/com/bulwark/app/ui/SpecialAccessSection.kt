@@ -17,6 +17,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import com.bulwark.app.ui.theme.CautionBackground
+import com.bulwark.app.ui.theme.CautionText
+import com.bulwark.app.ui.theme.Incomplete
+import com.bulwark.app.ui.theme.RatingAdvanced
+import com.bulwark.app.ui.theme.RatingExpert
+import com.bulwark.app.ui.theme.RatingRecommended
+import com.bulwark.app.ui.theme.RatingUnsafe
+import com.bulwark.app.ui.theme.Refused
+import com.bulwark.app.ui.theme.WorthLookingAt
 import com.bulwark.app.permissions.AppAccess
 import com.bulwark.app.permissions.Attention
 import com.bulwark.app.permissions.AuditSummary
@@ -83,7 +92,7 @@ fun SpecialAccessSection(
                 Text(
                     "Bulwark could not check: " + unavailable.joinToString("; ") + ".",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFFB25C00),
+                    color = Incomplete,
                 )
             }
 
@@ -106,7 +115,7 @@ private fun AccessRow(app: AppAccess) {
                     color = Color.White,
                     modifier = Modifier
                         .clip(RoundedCornerShape(4.dp))
-                        .background(Color(0xFFB71C1C))
+                        .background(WorthLookingAt)
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                 )
             }
@@ -133,11 +142,11 @@ private fun AccessRow(app: AppAccess) {
         }
 
         app.combinations().forEach {
-            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0))) {
+            Card(colors = CardDefaults.cardColors(containerColor = CautionBackground)) {
                 Text(
                     it.why,
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF7A3E00),
+                    color = CautionText,
                     modifier = Modifier.padding(10.dp),
                 )
             }
