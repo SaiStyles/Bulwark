@@ -47,14 +47,22 @@ import kotlinx.coroutines.withContext
  * Layer 1's real screen: everything installed, and what Bulwark will say about
  * each of it.
  *
- * **Read-only.** There is no remove button yet, deliberately. No destructive
- * action ships before its undo is written and tested
- * (`context/_shared/safety-rules.md` rule 3), and every one will pass through
- * `DestructiveActionGuard` when it does.
+ * **Switch off is live; uninstall is not.** Its undo was written and tested
+ * before it shipped (`context/_shared/safety-rules.md` rule 3) and it passes
+ * through `DestructiveActionGuard`, so the system authenticates outside our
+ * process before anything changes.
  *
- * What this screen is for right now is honesty: showing the user what is on
- * their phone, what it does, and which parts Bulwark refuses to touch and why.
- * That is useful on its own and it is the surface the actions will attach to.
+ * **One action per row, chosen by current state.** Never two side by side:
+ * hardware testing on 2026-09-10 found that offering "Switch off" and "Undo"
+ * together meant a second press of Undo performed a *disable* under a label
+ * promising the opposite. A button must say what it does.
+ *
+ * **No bulk selection, deliberately.** `safety-rules.md` rule 1 - forty
+ * changes at once means nobody can tell which one broke the phone.
+ *
+ * Beyond the actions, the screen's job is honesty: what is installed, what it
+ * does in the community's own words rather than the first line of them, and
+ * which parts Bulwark refuses to touch and why.
  */
 @Composable
 fun PackageListScreen(
