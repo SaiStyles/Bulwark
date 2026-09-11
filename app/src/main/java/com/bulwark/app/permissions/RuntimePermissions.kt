@@ -48,6 +48,17 @@ data class PermissionHolding(
     val isRuntime: Boolean?,
     /** `getPermissionFlags`, interpreted by [PermissionFlags]. */
     val flags: Int,
+    /**
+     * Whether this app is on the never-remove list.
+     *
+     * Filled in by the privileged reader, which is where that list lives. The
+     * policy layer refuses these anyway - `CommandSafety` runs on every step -
+     * so this does not add a protection. It stops the screen **offering** one
+     * it knows will be refused, which is a different failure: a control that
+     * can only fail is a promise the app cannot keep, and a batch stops at the
+     * first failure, so one such tick halts everything after it.
+     */
+    val isProtected: Boolean = false,
 )
 
 /**
@@ -126,6 +137,14 @@ enum class Revocable {
      * reason is the app deciding for someone silently.
      */
     UNKNOWN_KIND,
+
+    /**
+     * The app is on the never-remove list in `_shared/safety-rules.md`.
+     *
+     * The one refusal here that is Bulwark's own decision rather than the
+     * platform's, so it is the one that has to explain itself best.
+     */
+    PROTECTED,
     ;
 
     /** True only for the one value that means "we can act". */
@@ -154,6 +173,10 @@ enum class Revocable {
             UNKNOWN_KIND ->
                 "Bulwark could not work out what this permission is, so it will " +
                     "not offer to change it."
+            PROTECTED ->
+                "Bulwark never changes this app. It is part of calling, or part " +
+                    "of how you would undo a change, and breaking it could leave " +
+                    "you with no way back."
         }
 }
 
@@ -166,6 +189,9 @@ enum class Revocable {
  */
 fun PermissionHolding.revocable(): Revocable = when {
     !isGranted -> Revocable.NOT_GRANTED
+    // Before the platform's own refusals: "we will not touch this app" is the
+    // more useful thing to tell someone, and it is true regardless of flags.
+    isProtected -> Revocable.PROTECTED
     isRuntime == null -> Revocable.UNKNOWN_KIND
     !isRuntime -> Revocable.NOT_RUNTIME
     PermissionFlags.isSystemFixed(flags) -> Revocable.FIXED_BY_SYSTEM

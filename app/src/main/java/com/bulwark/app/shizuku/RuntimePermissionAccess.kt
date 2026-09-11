@@ -366,18 +366,27 @@ internal object RuntimePermissionAccess {
      * must not appear as an app holding nothing - which would be a false
      * statement about someone's phone rather than a gap.
      *
+     * @param installed the packages to sweep, with the system flag the
+     *   never-remove list needs. Names alone would mean asking the platform
+     *   again for something the caller already knows.
      * @return one entry per granted permission per app. Ungranted requests are
      *   dropped here: a list of apps that *could* ask answers a different and
      *   much less useful question.
      */
     fun sweep(
-        packageNames: List<String>,
+        installed: List<PrivilegedPackages.Installed>,
         ownPackageManager: PackageManager,
         userId: Int = 0,
-    ): List<PermissionHolding> = packageNames.flatMap { packageName ->
+    ): List<PermissionHolding> = installed.flatMap { app ->
+        // The never-remove list is answered here rather than by the screen,
+        // because this is the side of the binder it lives on and because the
+        // caller already knows which packages are system - the flag that
+        // decides whether the structural fragment list applies at all.
+        val protectedApp = ProtectedPackages.isProtected(app.packageName, app.isSystem)
         runCatching {
-            holdings(packageName, ownPackageManager, userId, withFlags = false)
+            holdings(app.packageName, ownPackageManager, userId, withFlags = false)
                 .filter { it.isGranted }
+                .map { it.copy(isProtected = protectedApp) }
         }.getOrDefault(emptyList())
     }
 

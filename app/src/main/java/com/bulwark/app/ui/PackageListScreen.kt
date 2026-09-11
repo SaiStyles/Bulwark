@@ -247,7 +247,7 @@ fun PackageListScreen(
             runCatching {
                 val installed = PrivilegedPackages.listDetailed()
                 val holdings = RuntimePermissionAccess.sweep(
-                    installed.map { it.packageName }, context.packageManager,
+                    installed, context.packageManager,
                 )
                 groupByPermission(holdings) to
                     installed.filter { it.isSystem }.map { it.packageName }.toSet()

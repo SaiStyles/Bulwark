@@ -22,7 +22,8 @@ class RuntimePermissionsTest {
         runtime: Boolean? = true,
         flags: Int = 0,
         packageName: String = "com.example.app",
-    ) = PermissionHolding(packageName, permission, granted, runtime, flags)
+        protectedApp: Boolean = false,
+    ) = PermissionHolding(packageName, permission, granted, runtime, flags, protectedApp)
 
     @Test
     fun `a granted runtime permission with no flags is ours to offer`() {
@@ -342,6 +343,41 @@ class RuntimePermissionsTest {
         assertEquals(
             listOf("android.permission.RECORD_AUDIO"),
             groupByPermission(holdings).map { it.permission },
+        )
+    }
+
+    @Test
+    fun `an app on the never-remove list is never offered a control`() {
+        // Found by looking at the screen on 2026-09-11: the row offered a tick
+        // for telephony components. The policy layer refused them, so nothing
+        // unsafe happened - but a control that can only fail is a promise the
+        // app cannot keep, and a batch stops at the first failure, so one such
+        // tick halts everything after it.
+        val verdict = holding(protectedApp = true).revocable()
+
+        assertEquals(Revocable.PROTECTED, verdict)
+        assertTrue("it must not be offered", !verdict.isOffered)
+        assertNotNull("and it must say why", verdict.plainReason)
+    }
+
+    @Test
+    fun `being protected outranks the platform's own refusals`() {
+        // Both are true of a telephony component. "Bulwark will not touch this
+        // app" is the more useful thing to tell someone, and it stays true
+        // whatever the flags say.
+        assertEquals(
+            Revocable.PROTECTED,
+            holding(protectedApp = true, flags = PermissionFlags.SYSTEM_FIXED).revocable(),
+        )
+    }
+
+    @Test
+    fun `but nothing held still reads as nothing to take away`() {
+        // The one thing that outranks it: there is no point explaining a
+        // refusal to change something the app does not have.
+        assertEquals(
+            Revocable.NOT_GRANTED,
+            holding(protectedApp = true, granted = false).revocable(),
         )
     }
 }
