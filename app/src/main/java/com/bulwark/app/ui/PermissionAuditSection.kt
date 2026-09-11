@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.bulwark.app.permissions.PermissionAcrossApps
+import com.bulwark.app.permissions.REVOKE_IS_NOT_A_LOCK
 import com.bulwark.app.permissions.PermissionHolding
 import com.bulwark.app.permissions.batchRevokeButton
 import com.bulwark.app.permissions.groupHeadline
@@ -78,6 +79,15 @@ fun PermissionAuditSection(
                     "decide. Android shows this one app at a time; this is the " +
                     "same information in one place.",
                 style = MaterialTheme.typography.bodySmall,
+            )
+            Spacer()
+            // Said before anything is offered, not after it is done. A screen
+            // that only mentions the limit in the failure case has already let
+            // someone walk away believing the wrong thing.
+            Text(
+                REVOKE_IS_NOT_A_LOCK,
+                style = MaterialTheme.typography.bodySmall,
+                color = Incomplete,
             )
 
             if (groups.isEmpty()) {

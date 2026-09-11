@@ -380,4 +380,30 @@ class RuntimePermissionsTest {
             holding(protectedApp = true, granted = false).revocable(),
         )
     }
+
+    @Test
+    fun `the screen says a revoke is not a lock, and owns the part that is a choice`() {
+        // Watched on hardware 2026-09-11: revoked, the app asked, the user said
+        // yes, it came back. Nothing broken - but Bulwark had said nothing, and
+        // advice that does not survive being followed is the failure this
+        // project already named once.
+        assertTrue(
+            "it must say the app can ask again: $REVOKE_IS_NOT_A_LOCK",
+            REVOKE_IS_NOT_A_LOCK.contains("asking for it again"),
+        )
+        // The limitation and the choice are different things, and the choice is
+        // the one worth owning rather than hiding inside the limitation.
+        assertTrue(
+            "it must own the refusal to override the user: $REVOKE_IS_NOT_A_LOCK",
+            REVOKE_IS_NOT_A_LOCK.contains("will not") &&
+                REVOKE_IS_NOT_A_LOCK.contains("choice you made"),
+        )
+        // No promise it cannot keep.
+        listOf("permanently", "forever", "never again", "blocks").forEach { word ->
+            assertTrue(
+                "it must not overclaim with \"$word\"",
+                !REVOKE_IS_NOT_A_LOCK.contains(word, ignoreCase = true),
+            )
+        }
+    }
 }

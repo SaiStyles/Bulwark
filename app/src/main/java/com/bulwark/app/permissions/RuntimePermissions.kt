@@ -487,3 +487,28 @@ fun groupHeadline(group: PermissionAcrossApps, systemPackages: Set<String>?): St
         else -> "$apps, $shipped came with the phone"
     }
 }
+
+/**
+ * What a revoke does not do, said where the revoke is offered.
+ *
+ * Watched on the Agni 2, 2026-09-11: a permission was taken away, the app asked
+ * for it on next use, the user said yes, and it came back. Nothing was broken -
+ * that is how Android works, and the flags show `USER_SET` rather than
+ * `USER_FIXED`.
+ *
+ * But Bulwark said nothing about it, and silence there is the failure this
+ * project already named once. `layers/02-permissions.md`: **every piece of
+ * advice Bulwark gives should survive being followed.** Someone who clears
+ * twenty-seven microphone permissions, believes they are done, and then taps
+ * "allow" out of habit a week later is worse off for having believed it - and
+ * we knew and did not say.
+ *
+ * The second sentence matters as much as the first. Not being able to stop the
+ * app asking is a limitation; refusing to reverse an answer the user gave is a
+ * **choice**, and one worth owning out loud rather than hiding inside the
+ * limitation.
+ */
+const val REVOKE_IS_NOT_A_LOCK: String =
+    "Taking a permission away does not stop an app asking for it again. If you " +
+        "say yes to that prompt later, it comes back - and Bulwark will not " +
+        "undo a choice you made."
