@@ -136,7 +136,7 @@ class UadDatabase private constructor(private val entries: Map<String, UadEntry>
          * and the one call site did not - it re-parsed on every refresh, so
          * every switch-off re-read a megabyte to answer a question whose answer
          * had not changed. Telling a caller to cache is a wish; caching here is
-         * a property (`conventions.md` lesson 1).
+         * a property (`lessons.md` lesson 1).
          *
          * Safe to hold forever: the parsed data is immutable, bundled in the
          * APK, and cannot change without a new install. **No `Context` is

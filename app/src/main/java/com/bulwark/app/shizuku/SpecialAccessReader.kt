@@ -176,7 +176,7 @@ object SpecialAccessReader {
      * The user gets "Bulwark could not check X", which is what they need. This
      * is for whoever has to find out *why*, and it exists because the first
      * run of this audit failed one source silently - a swallowed cause is a
-     * check nobody can watch fail (`conventions.md` lesson 2).
+     * check nobody can watch fail (`lessons.md` lesson 2).
      *
      * Logcat only, never a file and never the network.
      */
