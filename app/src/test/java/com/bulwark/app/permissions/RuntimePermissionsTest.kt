@@ -323,4 +323,25 @@ class RuntimePermissionsTest {
         // worse than no split.
         assertEquals("3 apps", groupHeadline(group, null))
     }
+
+    @Test
+    fun `the cross-app view leaves out what nobody can act on`() {
+        // Found on the Agni 2, 2026-09-11: without this the screen fills with
+        // install-time permissions - `Access adservices attribution` across 47
+        // apps, `C2d message`, `Dynamic receiver not exported permission` -
+        // and Microphone and Camera get pushed off the first screenful, which
+        // is the only one most people read.
+        val holdings = listOf(
+            holding(permission = "android.permission.RECORD_AUDIO"),
+            holding(permission = "android.permission.ACCESS_ADSERVICES_ATTRIBUTION", runtime = false),
+            // Could not be classified. Not offerable either way, and a row
+            // nobody can act on with an apology attached is still noise.
+            holding(permission = "com.oem.permission.MYSTERY", runtime = null),
+        )
+
+        assertEquals(
+            listOf("android.permission.RECORD_AUDIO"),
+            groupByPermission(holdings).map { it.permission },
+        )
+    }
 }

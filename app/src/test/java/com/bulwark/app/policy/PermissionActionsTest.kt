@@ -13,9 +13,10 @@ import org.junit.Test
  * platform that ignores a call must not be reported as success, and a restore
  * must put back what Bulwark *found* rather than reversing its own last move.
  *
- * The privileged calls underneath are unverified on hardware. These tests
- * cannot fix that and do not pretend to - they assert the policy layer, which
- * is the half that can be checked without a phone.
+ * These assert the policy layer, which is the half that can be checked
+ * without a phone. The privileged calls underneath were watched working on the
+ * Agni 2 on 2026-09-11 - see `PermissionRoundTripOnHardware`, which is a
+ * different kind of evidence and not a substitute for these.
  */
 class PermissionActionsTest {
 

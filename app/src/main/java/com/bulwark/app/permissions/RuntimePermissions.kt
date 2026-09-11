@@ -337,10 +337,28 @@ data class PermissionAcrossApps(
  * does badly. Only granted holdings appear - a list of apps that *could* ask
  * for the microphone answers a different and much less useful question.
  *
+ * ## Runtime permissions only, and that is a judgement
+ *
+ * Seen on the Agni 2, 2026-09-11: without this filter the screen fills with
+ * install-time permissions. `Access adservices attribution` across 47 apps,
+ * `C2d message`, `Dynamic receiver not exported permission` - none of which any
+ * person can act on, and none of which mean anything to one. They pushed
+ * Microphone and Camera off the first screenful, which is the only one most
+ * people read.
+ *
+ * So the cross-app view shows what Android treats as **the user's to decide**.
+ * The screen says so rather than implying it is everything, because "every
+ * permission" and "every permission you can answer for" are different claims
+ * and only one of them is true here.
+ *
+ * Permissions Bulwark could not classify are left out too - `isRuntime` is
+ * three-valued and only a definite yes appears. They are not offerable in any
+ * case, and a row nobody can act on labelled with an apology is still noise.
+ *
  * Pure, so the grouping the screen depends on is tested without a device.
  */
 fun groupByPermission(holdings: List<PermissionHolding>): List<PermissionAcrossApps> =
-    holdings.filter { it.isGranted }
+    holdings.filter { it.isGranted && it.isRuntime == true }
         .groupBy { it.permission }
         .map { (permission, held) ->
             PermissionAcrossApps(permission, held.sortedBy { it.packageName })

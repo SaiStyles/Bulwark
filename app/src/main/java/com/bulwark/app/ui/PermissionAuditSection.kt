@@ -74,9 +74,9 @@ fun PermissionAuditSection(
             Text("What apps can do", style = MaterialTheme.typography.titleMedium)
             Spacer()
             Text(
-                "Every app that currently holds each permission. Android shows " +
-                    "this one app at a time; this is the same information in one " +
-                    "place.",
+                "Every app holding each permission Android treats as yours to " +
+                    "decide. Android shows this one app at a time; this is the " +
+                    "same information in one place.",
                 style = MaterialTheme.typography.bodySmall,
             )
 

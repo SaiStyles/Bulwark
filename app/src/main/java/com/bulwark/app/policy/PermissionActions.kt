@@ -42,12 +42,21 @@ import com.bulwark.app.shizuku.RuntimePermissionAccess
  * for the package one: same guards per step, logged individually, reported per
  * item.
  *
- * ## UNVERIFIED ON HARDWARE
+ * ## Proven on hardware
  *
- * The guards, the ordering and the log are unit-tested. The privileged call
- * underneath is `RuntimePermissionAccess`, which has never run on a phone -
- * see its own note and `NOW.md`. Nothing here should be described as working
- * until it has.
+ * Watched working on the Agni 2, 2026-09-11, against `com.jio.myjio` - a
+ * target SAI approved for exactly this. `ACCESS_FINE_LOCATION` went granted ->
+ * revoked -> granted, the read-back confirmed each change against the platform
+ * rather than trusting the call, the real SQLite log recorded the attempt and
+ * its outcome, and the permission came back with its `USER_SET` flag intact.
+ *
+ * `PermissionRoundTripOnHardware` is that run, kept as a test. It is the only
+ * test in the project that changes the phone, and it is deliberately outside
+ * the read-only smoke suite.
+ *
+ * **Still unproven: the authentication prompt in front of all this.** It needs
+ * a fingerprint, which a test suite does not have, so it is checked by a person
+ * using the app.
  */
 class PermissionActions(
     private val journal: ActionJournal,
