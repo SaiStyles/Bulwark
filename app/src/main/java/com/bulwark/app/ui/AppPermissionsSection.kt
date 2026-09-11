@@ -135,10 +135,18 @@ private fun HeldPermissionRow(
 
     Row(
         Modifier.fillMaxWidth().padding(top = 6.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        // Top, not centre: the button belongs beside the permission's name,
+        // not floating halfway down a description that may run to three lines.
+        verticalAlignment = Alignment.Top,
     ) {
-        Column(Modifier.padding(end = 8.dp)) {
+        // weight(1f) is doing real work. Without it the text column takes
+        // whatever width it likes and the button is left with the remainder -
+        // which on the device meant buttons 48px and 5px wide on two rows of
+        // the same list, each starting at a different x. The text yields the
+        // space instead, so every button keeps its natural size and they all
+        // share one right edge.
+        Column(Modifier.weight(1f)) {
             Text(words.name, fontWeight = FontWeight.Medium)
             words.meaning?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall)
