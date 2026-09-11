@@ -38,7 +38,12 @@ import com.bulwark.app.debloat.PackageCatalog
 import com.bulwark.app.debloat.RemovalRating
 import com.bulwark.app.debloat.UadDatabase
 import com.bulwark.app.debloat.readableDescription
+import com.bulwark.app.permissions.AppAccess
+import com.bulwark.app.permissions.AuditSummary
+import com.bulwark.app.permissions.audit
+import com.bulwark.app.permissions.summarise
 import com.bulwark.app.shizuku.PrivilegedPackages
+import com.bulwark.app.shizuku.SpecialAccessReader
 import com.bulwark.app.shizuku.ShizukuState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -77,6 +82,9 @@ fun PackageListScreen(
     var query by remember { mutableStateOf("") }
     var onlyOffered by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
+    var access by remember { mutableStateOf<List<AppAccess>?>(null) }
+    var accessSummary by remember { mutableStateOf<AuditSummary?>(null) }
+    var accessUnavailable by remember { mutableStateOf<List<String>>(emptyList()) }
     var reload by remember { mutableIntStateOf(0) }
     val interrupted = remember(reload) { runCatching { runner.interrupted() }.getOrDefault(emptyList()) }
 
@@ -92,6 +100,37 @@ fun PackageListScreen(
     }
 
     val ready = state is ShizukuState.Ready
+
+    // The special-access audit runs whether or not Shizuku is up: accessibility
+    // and device admin need no privilege at all, so the two most dangerous
+    // accesses are readable on first launch. Only the AppOps four wait.
+    LaunchedEffect(state, reload) {
+        val built = withContext(Dispatchers.IO) {
+            val privileged = state is ShizukuState.Ready
+            val result = SpecialAccessReader.read(context, privileged)
+            // The privileged list when we have it - it sees all 370 and is
+            // authoritative - falling back to our own PackageManager, which
+            // sees about 176 under visibility filtering. Null when neither
+            // knows, which the UI says out loud rather than guessing.
+            val installed = if (privileged) {
+                runCatching { PrivilegedPackages.listDetailed() }.getOrNull()
+            } else {
+                null
+            }
+            val known = installed?.map { it.packageName }?.toSet()
+            val systemPackages = installed?.filter { it.isSystem }?.map { it.packageName }?.toSet()
+            val apps = result.holders.map { (pkg, accesses) ->
+                AppAccess(
+                    pkg, accesses,
+                    isSystem = SpecialAccessReader.isSystem(context, pkg, systemPackages, known),
+                )
+            }
+            Triple(apps.audit(), apps.summarise(), result.unavailable)
+        }
+        access = built.first
+        accessSummary = built.second
+        accessUnavailable = built.third
+    }
 
     LaunchedEffect(ready, reload) {
         if (!ready) return@LaunchedEffect
@@ -122,12 +161,19 @@ fun PackageListScreen(
         )
 
         when {
-            !ready -> Text(
+            !ready -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Shown even without Shizuku, deliberately. It is the one thing
+                // Bulwark can say on first launch that is worth caring about.
+                access?.let { a ->
+                    accessSummary?.let { SpecialAccessSection(a, it, accessUnavailable) }
+                }
+                Text(
                 "Start Shizuku to see every package. Without it Bulwark can only " +
                     "see about half of what is installed - and the half it cannot " +
                     "see is the preinstalled software.",
                 style = MaterialTheme.typography.bodyMedium,
-            )
+                )
+            }
 
             error != null -> Card {
                 Text("Could not read packages\n\n$error", Modifier.padding(14.dp))
@@ -139,6 +185,9 @@ fun PackageListScreen(
             ) { CircularProgressIndicator() }
 
             else -> {
+                access?.let { a ->
+                    accessSummary?.let { SpecialAccessSection(a, it, accessUnavailable) }
+                }
                 if (interrupted.isNotEmpty()) InterruptedCard(interrupted.map { it.packageName })
                 notice?.let { NoticeCard(it) { notice = null } }
                 summary?.let { SummaryCard(it) }
