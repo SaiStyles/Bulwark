@@ -12,6 +12,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import com.bulwark.app.policy.ActionJournal
 import com.bulwark.app.policy.PackageActions
+import com.bulwark.app.policy.PermissionActions
 import com.bulwark.app.policy.SqliteActionLog
 import com.bulwark.app.security.StrictModePolicy
 import com.bulwark.app.security.WindowHardening
@@ -47,6 +48,7 @@ class MainActivity : ComponentActivity() {
             activity = this,
             actions = PackageActions(journal, packageName),
             journal = journal,
+            permissions = PermissionActions(journal),
         )
         // From PackageManager rather than BuildConfig: no extra build feature,
         // and it reports the version actually installed, which is what a bug

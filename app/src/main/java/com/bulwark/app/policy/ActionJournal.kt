@@ -47,6 +47,9 @@ class ActionJournal(private val log: ActionLog) {
      * @param previousState for [ActionKind.DISABLE], the enabled-state the
      *   package had before this call, so the undo restores what was there
      *   rather than assuming it was enabled.
+     * @param permission required for the permission kinds, forbidden for the
+     *   rest. Both directions are enforced: a row that names a permission for a
+     *   whole-app action describes something that did not happen.
      * @return whatever [block] returned.
      * @throws Throwable whatever [block] threw, after recording the failure.
      */
@@ -55,8 +58,20 @@ class ActionJournal(private val log: ActionLog) {
         packageName: String,
         userId: Int = 0,
         previousState: Int? = null,
+        permission: String? = null,
         block: () -> T,
     ): T {
+        // A permission action that does not say which permission cannot be
+        // undone - the undo would know the app and the intent and have nothing
+        // to act on. Checked here rather than in the caller because this is the
+        // only door into the log, so there is no second caller to forget it.
+        require(!kind.isPermissionChange || permission != null) {
+            "$kind must record which permission it changed"
+        }
+        require(kind.isPermissionChange || permission == null) {
+            "$kind is not a permission change; it must not record one"
+        }
+
         val attemptId = log.append(
             NewEntry(
                 packageName = packageName,
@@ -64,6 +79,7 @@ class ActionJournal(private val log: ActionLog) {
                 phase = Phase.ATTEMPTED,
                 userId = userId,
                 previousState = previousState,
+                permission = permission,
             )
         )
 
@@ -73,12 +89,16 @@ class ActionJournal(private val log: ActionLog) {
             recordOutcome(
                 kind, packageName, userId, attemptId, Phase.FAILED,
                 detail = failure.describe(),
+                permission = permission,
                 onFailure = failure,
             )
             throw failure
         }
 
-        recordOutcome(kind, packageName, userId, attemptId, Phase.SUCCEEDED, detail = null)
+        recordOutcome(
+            kind, packageName, userId, attemptId, Phase.SUCCEEDED,
+            detail = null, permission = permission,
+        )
         return result
     }
 
@@ -95,6 +115,7 @@ class ActionJournal(private val log: ActionLog) {
         attemptId: Long,
         phase: Phase,
         detail: String?,
+        permission: String? = null,
         onFailure: Throwable? = null,
     ) {
         try {
@@ -106,6 +127,10 @@ class ActionJournal(private val log: ActionLog) {
                     userId = userId,
                     attemptId = attemptId,
                     detail = detail,
+                    // Repeated on the outcome row so a reader of one row knows
+                    // what it is about. The rows are separate records, not a
+                    // header and a continuation.
+                    permission = permission,
                 )
             )
         } catch (logFailure: Throwable) {

@@ -86,9 +86,14 @@ class SqliteActionLog(
 
         override fun onUpgrade(db: SQLiteDatabase, old: Int, new: Int) {
             // Append-only means no destructive migration is ever correct here.
-            // Future versions add nullable columns; they never drop or rewrite
-            // one, because a row already written is a record of something that
+            // Versions add nullable columns; they never drop or rewrite one,
+            // because a row already written is a record of something that
             // actually happened to a real phone.
+            //
+            // 1 -> 2 (2026-09-11) adds the permission a row is about. Old rows
+            // get NULL, which is the truth: they were whole-app actions and
+            // there was no permission involved.
+            if (old < 2) db.execSQL("ALTER TABLE $TABLE ADD COLUMN $COL_PERMISSION TEXT")
         }
 
         override fun onDowngrade(db: SQLiteDatabase, old: Int, new: Int) {
@@ -109,6 +114,7 @@ class SqliteActionLog(
             entry.previousState?.let { put(COL_PREVIOUS_STATE, it) }
             entry.attemptId?.let { put(COL_ATTEMPT, it) }
             entry.detail?.let { put(COL_DETAIL, it) }
+            entry.permission?.let { put(COL_PERMISSION, it) }
         }
         val id = helper.writableDatabase.insertOrThrow(TABLE, null, values)
         // insertOrThrow already throws on failure; -1 would mean the contract
@@ -147,6 +153,7 @@ class SqliteActionLog(
         previousState = getIntOrNull(COL_PREVIOUS_STATE),
         attemptId = getLongOrNull(COL_ATTEMPT),
         detail = getStringOrNull(COL_DETAIL),
+        permission = getStringOrNull(COL_PERMISSION),
     )
 
     private fun Cursor.getIntOrNull(column: String): Int? =
@@ -160,7 +167,15 @@ class SqliteActionLog(
 
     private companion object {
         const val DATABASE_NAME = "action-log.db"
-        const val VERSION = 1
+
+        /**
+         * 2 since 2026-09-11: `permission` added for the two permission kinds.
+         *
+         * A phone that already holds a version-1 log upgrades in place through
+         * `onUpgrade`; nothing is rewritten and nothing is lost, which is the
+         * only migration an append-only table can honestly perform.
+         */
+        const val VERSION = 2
 
         const val TABLE = "actions"
         const val COL_ID = "id"
@@ -172,6 +187,7 @@ class SqliteActionLog(
         const val COL_PREVIOUS_STATE = "previous_state"
         const val COL_ATTEMPT = "attempt_id"
         const val COL_DETAIL = "detail"
+        const val COL_PERMISSION = "permission"
 
         const val CREATE_TABLE = """
             CREATE TABLE $TABLE (
@@ -183,7 +199,8 @@ class SqliteActionLog(
                 $COL_USER INTEGER NOT NULL,
                 $COL_PREVIOUS_STATE INTEGER,
                 $COL_ATTEMPT INTEGER,
-                $COL_DETAIL TEXT
+                $COL_DETAIL TEXT,
+                $COL_PERMISSION TEXT
             )
         """
 

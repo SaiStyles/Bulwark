@@ -58,7 +58,10 @@ import com.bulwark.app.permissions.AppAccess
 import com.bulwark.app.permissions.AuditSummary
 import com.bulwark.app.permissions.RatFinding
 import com.bulwark.app.permissions.ratFindings
+import com.bulwark.app.permissions.PermissionAcrossApps
 import com.bulwark.app.permissions.audit
+import com.bulwark.app.permissions.groupByPermission
+import com.bulwark.app.shizuku.RuntimePermissionAccess
 import com.bulwark.app.permissions.summarise
 import com.bulwark.app.shizuku.PrivilegedPackages
 import com.bulwark.app.shizuku.SpecialAccessReader
@@ -113,6 +116,12 @@ fun PackageListScreen(
     // refresh - invisible on a fast phone and exactly the kind of thing that
     // makes a cheap one stutter.
     var interrupted by remember { mutableStateOf<List<ActionRecord>>(emptyList()) }
+    var permissionGroups by remember { mutableStateOf<List<PermissionAcrossApps>>(emptyList()) }
+    // Null means "could not tell", never "none" - see originLabelFor.
+    var systemPackages by remember { mutableStateOf<Set<String>?>(null) }
+    // Capabilities whose flag read has come back. Until a permission is in
+    // here, its rows are still being checked and no control is drawn.
+    var refinedPermissions by remember { mutableStateOf(emptySet<String>()) }
 
     fun report(outcome: ActionRunner.Outcome) {
         val message = when (outcome) {
@@ -226,6 +235,29 @@ fun PackageListScreen(
         }
     }
 
+    // The cross-app permission view. Needs Shizuku: reading another app's
+    // granted permissions is privileged, unlike the special-access audit above.
+    //
+    // Deliberately without flags. Flags cost a binder call each and decide only
+    // whether a row may be *offered*, which matters for the handful of rows a
+    // user opens - not for the few thousand this sweep sees.
+    LaunchedEffect(ready, reload) {
+        if (!ready) return@LaunchedEffect
+        val built = withContext(Dispatchers.IO) {
+            runCatching {
+                val installed = PrivilegedPackages.listDetailed()
+                val holdings = RuntimePermissionAccess.sweep(
+                    installed.map { it.packageName }, context.packageManager,
+                )
+                groupByPermission(holdings) to
+                    installed.filter { it.isSystem }.map { it.packageName }.toSet()
+            }.getOrNull()
+        }
+        permissionGroups = built?.first.orEmpty()
+        systemPackages = built?.second
+        refinedPermissions = emptySet()
+    }
+
     Box(modifier.fillMaxSize()) {
       Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         Text(
@@ -249,6 +281,51 @@ fun PackageListScreen(
                     item(key = "access") {
                         CollapsibleAudit(a, s, accessUnavailable, ratSignals)
                     }
+                }
+            }
+
+            // The cross-app permission view, below the special-access audit
+            // because that one names the more dangerous accesses and needs no
+            // privilege to do it.
+            if (permissionGroups.isNotEmpty()) {
+                item(key = "permissions") {
+                    PermissionAuditSection(
+                        groups = permissionGroups,
+                        systemPackages = systemPackages,
+                        refined = refinedPermissions,
+                        onOpen = { permission ->
+                            // The expensive half, paid only for a capability
+                            // someone actually opened.
+                            if (permission !in refinedPermissions) scope.launch {
+                                val refreshed = withContext(Dispatchers.IO) {
+                                    val group = permissionGroups
+                                        .firstOrNull { it.permission == permission }
+                                        ?: return@withContext null
+                                    RuntimePermissionAccess.refineWithFlags(group.holders)
+                                }
+                                if (refreshed != null) {
+                                    permissionGroups = permissionGroups.map {
+                                        if (it.permission == permission) {
+                                            it.copy(holders = refreshed)
+                                        } else {
+                                            it
+                                        }
+                                    }
+                                    refinedPermissions = refinedPermissions + permission
+                                }
+                            }
+                        },
+                        onRevoke = { permission, packages ->
+                            runner.revokeAcrossApps(permission, packages) { outcome ->
+                                report(outcome)
+                                // Re-read rather than assume: the screen must
+                                // show what the phone says, not what we asked
+                                // for. A revoke the platform ignored has to
+                                // come back looking ignored.
+                                reload++
+                            }
+                        },
+                    )
                 }
             }
 

@@ -179,14 +179,6 @@ class PackageActions(
         }?.previousState
     }
 
-    /** What happened to one package during [restoreEverything]. */
-    data class RestoreStep(
-        val packageName: String,
-        val succeeded: Boolean,
-        /** Why it failed, in the platform's words. Null on success. */
-        val failure: String? = null,
-    )
-
     /**
      * Puts every package Bulwark changed back to the state it found.
      *
@@ -210,21 +202,37 @@ class PackageActions(
      * insertion order can put a dependency back before the thing that needed
      * it.
      *
-     * @return one [RestoreStep] per package, in the order attempted. Empty
-     *   when Bulwark has changed nothing.
+     * **Whole-app changes only.** The permission half lives in
+     * [PermissionActions.restoreEverything]; the two are run together by the
+     * caller under a single authentication, because putting everything back is
+     * one intent even where it is two mechanisms.
+     *
+     * @return one [StepOutcome] per package, in the order attempted. Empty
+     *   when Bulwark has disabled nothing.
      */
-    fun restoreEverything(userId: Int = 0): List<RestoreStep> {
+    fun restoreEverything(userId: Int = 0): List<StepOutcome> {
         val history = journal.history()
         // One entry per package: restoring a package twice is pointless, and
         // the second attempt would undo the first.
-        val packages = history.undoPlan().map { it.packageName }.distinct()
+        //
+        // Permission changes are filtered out rather than ignored: they are
+        // restored by `PermissionActions.restoreEverything`, and the caller
+        // runs both under one authentication. Without this filter an app whose
+        // only change was a revoked permission would be handed to
+        // [switchBackOn], which would find nothing to enable and report a
+        // success for work it had not done.
+        val packages = history.undoPlan()
+            .filterNot { it.kind.isPermissionChange }
+            .map { it.packageName }
+            .distinct()
 
         return packages.map { packageName ->
             runCatching { switchBackOn(packageName, userId) }.fold(
-                onSuccess = { RestoreStep(packageName, succeeded = true) },
+                onSuccess = { StepOutcome(packageName, permission = null, succeeded = true) },
                 onFailure = {
-                    RestoreStep(
+                    StepOutcome(
                         packageName,
+                        permission = null,
                         succeeded = false,
                         failure = "${it::class.java.simpleName}: ${it.message}",
                     )
@@ -253,10 +261,11 @@ class PackageActions(
         when (step.kind) {
             ActionKind.ENABLE -> enable(packageName, step.previousState, userId)
             ActionKind.DISABLE -> disable(packageName, userId)
-            // Uninstall and its undo do not exist yet. Refusing loudly beats
-            // silently doing nothing, which would read to the user as "undo
-            // worked" when nothing had happened.
-            else -> error("No undo implemented for ${step.kind}")
+            // Uninstall and its undo do not exist yet, and permission changes
+            // are undone by PermissionActions, which knows which permission.
+            // Refusing loudly beats silently doing nothing, which would read to
+            // the user as "undo worked" when nothing had happened.
+            else -> error("No undo implemented here for ${step.kind}")
         }
         return true
     }

@@ -416,4 +416,30 @@ class PackageActionsTest {
         assertTrue("must not have touched anything", state.writes.isEmpty())
     }
 
+    @Test
+    fun `restoreEverything ignores permission changes, which are another class's job`() {
+        // A package whose only change was a revoked permission must not be
+        // handed to switchBackOn: it would find nothing to enable, report a
+        // success, and tell the user a permission had been put back when
+        // nothing had. PermissionActions restores those; the UI runs both
+        // under one authentication.
+        val log = FakeLog()
+        log.append(
+            NewEntry(
+                "com.example.app", ActionKind.REVOKE_PERMISSION, Phase.ATTEMPTED, 0,
+                permission = "android.permission.CAMERA",
+            )
+        )
+        log.append(
+            NewEntry(
+                "com.example.app", ActionKind.REVOKE_PERMISSION, Phase.SUCCEEDED, 0,
+                attemptId = 1, permission = "android.permission.CAMERA",
+            )
+        )
+        val state = FakeState()
+        val act = PackageActions(ActionJournal(log), "com.bulwark.app", state)
+
+        assertTrue("no package-level restore is owed here", act.restoreEverything().isEmpty())
+        assertTrue("and nothing may be written", state.writes.isEmpty())
+    }
 }

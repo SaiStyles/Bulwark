@@ -38,6 +38,7 @@ class ActionJournalTest {
                 previousState = entry.previousState,
                 attemptId = entry.attemptId,
                 detail = entry.detail,
+                permission = entry.permission,
             )
             return id
         }
@@ -206,5 +207,59 @@ class ActionJournalTest {
         assertTrue(log.all().unfinished().isEmpty())
         assertNull(log.all().firstOrNull())
         assertFalse(ActionJournal(log).history().isNotEmpty())
+    }
+
+    @Test
+    fun `a permission action must record which permission`() {
+        // Without it the undo knows the app and the intent and has nothing to
+        // act on. The journal is the only door into the log, so this is the
+        // one place the requirement cannot be forgotten by a second caller.
+        val log = FakeLog()
+        val journal = ActionJournal(log)
+
+        val failure = runCatching {
+            journal.perform(ActionKind.REVOKE_PERMISSION, "com.example") { }
+        }.exceptionOrNull()
+
+        assertTrue(
+            "a permission action with no permission must be refused",
+            failure is IllegalArgumentException,
+        )
+        assertTrue("and nothing may be recorded", log.all().isEmpty())
+    }
+
+    @Test
+    fun `a whole-app action must not record a permission`() {
+        // The other direction, and it matters as much: a DISABLE row naming a
+        // permission describes something that did not happen, and the log is
+        // the only account of what did.
+        val log = FakeLog()
+        val journal = ActionJournal(log)
+
+        val failure = runCatching {
+            journal.perform(
+                ActionKind.DISABLE, "com.example",
+                permission = "android.permission.CAMERA",
+            ) { }
+        }.exceptionOrNull()
+
+        assertTrue(failure is IllegalArgumentException)
+        assertTrue(log.all().isEmpty())
+    }
+
+    @Test
+    fun `the permission is on both the attempt and the outcome`() {
+        // Two separate records, not a header and a continuation: whoever reads
+        // one row must be able to tell what it is about.
+        val log = FakeLog()
+        val journal = ActionJournal(log)
+
+        journal.perform(
+            ActionKind.REVOKE_PERMISSION, "com.example",
+            permission = "android.permission.CAMERA",
+        ) { }
+
+        assertEquals(2, log.all().size)
+        assertTrue(log.all().all { it.permission == "android.permission.CAMERA" })
     }
 }

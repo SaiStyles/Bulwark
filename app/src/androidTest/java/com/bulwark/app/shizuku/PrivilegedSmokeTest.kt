@@ -3,6 +3,9 @@ package com.bulwark.app.shizuku
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.bulwark.app.permissions.Access
+import com.bulwark.app.permissions.Revocable
+import com.bulwark.app.permissions.revocable
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -18,7 +21,9 @@ import org.junit.runner.RunWith
  *
  * Everything here reads. Nothing disables, enables, revokes or grants: those
  * need `safety-rules.md`'s guards and a human who chose the package, and a test
- * suite is neither.
+ * suite is neither. That holds for the permission calls too - the suite checks
+ * that the revoke path *resolves*, never that it works, because proving it
+ * works means changing something on a real phone.
  *
  * ## Running these needs a step the suite cannot take itself
  *
@@ -179,6 +184,50 @@ class PrivilegedSmokeTest {
             "sources failed with Shizuku available: ${result.unavailable}",
             result.unavailable.isEmpty(),
         )
+    }
+
+    @Test
+    fun thePermissionApiResolvesToAKnownShape() {
+        // Deliberately **not** behind requireShizuku. Resolution reads class
+        // metadata rather than the binder, so this still answers on a run that
+        // has just dropped its own grant - and it is the check that decides
+        // whether Bulwark offers a revoke control at all.
+        val flavour = RuntimePermissionAccess.flavour()
+        assertTrue(
+            "no permission API Bulwark recognises on this device (API " +
+                "${android.os.Build.VERSION.SDK_INT}). Revoke will be offered " +
+                "nowhere until the shape is added, which is the intended " +
+                "failure - but it means the layer is off on this phone.",
+            flavour != null,
+        )
+        assertTrue(RuntimePermissionAccess.canChangePermissions)
+    }
+
+    @Test
+    fun ourOwnPermissionsReadBackWithTheirFlags() {
+        requireShizuku()
+
+        // Bulwark's own package: always present, and reading it changes
+        // nothing. This is what exercises the resolved signature against the
+        // real binder - getPermissionFlags is called for every granted row.
+        val holdings = RuntimePermissionAccess.holdings(
+            context.packageName, context.packageManager,
+        )
+
+        assertTrue("Bulwark requests permissions; none came back", holdings.isNotEmpty())
+        val biometric = holdings.firstOrNull {
+            it.permission == "android.permission.USE_BIOMETRIC"
+        }
+        assertTrue("USE_BIOMETRIC should be among our own requests", biometric != null)
+        // Normal permission, granted at install. Bulwark must read it as
+        // something it cannot revoke - if this ever reads as offerable, the
+        // protection-level check has stopped working and the app is drawing
+        // buttons that cannot do anything.
+        assertTrue(
+            "USE_BIOMETRIC must not read as revocable",
+            !biometric!!.revocable().isOffered,
+        )
+        assertEquals(Revocable.NOT_RUNTIME, biometric.revocable())
     }
 
     private companion object {

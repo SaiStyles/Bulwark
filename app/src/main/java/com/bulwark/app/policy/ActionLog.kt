@@ -67,6 +67,22 @@ enum class ActionKind {
 
     /** `installExistingPackageAsUser` - the undo for [UNINSTALL]. */
     INSTALL_EXISTING,
+
+    /**
+     * `revokeRuntimePermission` for one permission on one package.
+     *
+     * Destructive in the sense that matters here: it takes a capability away,
+     * and an app that handles the refusal badly will crash. Reversible because
+     * uid 2000 can grant as well as revoke - proven on the Agni 2, 2026-09-11.
+     *
+     * Rows of this kind must carry [NewEntry.permission]. Which permission it
+     * was *is* the action; a revoke recorded against a package alone cannot be
+     * undone, only guessed at, and [ActionJournal] refuses to write one.
+     */
+    REVOKE_PERMISSION,
+
+    /** `grantRuntimePermission` - the undo for [REVOKE_PERMISSION]. */
+    GRANT_PERMISSION,
     ;
 
     /**
@@ -84,10 +100,17 @@ enum class ActionKind {
             ENABLE -> DISABLE
             UNINSTALL -> INSTALL_EXISTING
             INSTALL_EXISTING -> UNINSTALL
+            REVOKE_PERMISSION -> GRANT_PERMISSION
+            GRANT_PERMISSION -> REVOKE_PERMISSION
         }
 
     /** True when this takes a capability away rather than giving it back. */
-    val isDestructive: Boolean get() = this == DISABLE || this == UNINSTALL
+    val isDestructive: Boolean
+        get() = this == DISABLE || this == UNINSTALL || this == REVOKE_PERMISSION
+
+    /** True when this action is about one permission rather than a whole app. */
+    val isPermissionChange: Boolean
+        get() = this == REVOKE_PERMISSION || this == GRANT_PERMISSION
 }
 
 /** Where one attempt got to. */
@@ -127,6 +150,15 @@ data class NewEntry(
     val attemptId: Long? = null,
     /** Free text. An error message on failure; otherwise usually null. */
     val detail: String? = null,
+    /**
+     * The permission this row is about, for [ActionKind.REVOKE_PERMISSION] and
+     * [ActionKind.GRANT_PERMISSION]. Null for everything else.
+     *
+     * Its own column rather than a line in [detail], because the undo *reads*
+     * it. [detail] is bounded free text written for a human to look at; a field
+     * the code depends on has to be one the code can rely on being there.
+     */
+    val permission: String? = null,
 )
 
 /** One recorded fact, as it comes back out. */
@@ -140,6 +172,8 @@ data class ActionRecord(
     val previousState: Int?,
     val attemptId: Long?,
     val detail: String?,
+    /** The permission, for the two permission kinds. Null for the rest. */
+    val permission: String? = null,
 )
 
 /**
@@ -187,6 +221,10 @@ fun List<ActionRecord>.undoPlan(): List<NewEntry> {
             // Carried through so ENABLE restores the state DISABLE found,
             // rather than assuming it found an enabled package.
             previousState = attempt.previousState,
+            // And so a permission undo knows which permission. Without this
+            // the plan names an app and an intent to grant, with nothing to
+            // grant - which is not a plan, it is a shape of one.
+            permission = attempt.permission,
         )
     }
 }

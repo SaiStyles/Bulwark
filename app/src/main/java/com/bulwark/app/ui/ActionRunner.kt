@@ -6,6 +6,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
 import com.bulwark.app.policy.ActionJournal
 import com.bulwark.app.policy.PackageActions
+import com.bulwark.app.permissions.batchRevokePrompt
+import com.bulwark.app.permissions.wordsFor
+import com.bulwark.app.policy.PermissionActions
 import com.bulwark.app.security.DestructiveActionGuard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -42,6 +45,15 @@ class ActionRunner(
     private val activity: ComponentActivity,
     private val actions: PackageActions,
     private val journal: ActionJournal,
+    /**
+     * The permission half of the policy layer.
+     *
+     * Held only so that [restoreEverything] can put permissions back too. A
+     * "put everything back" that silently left revoked permissions revoked
+     * would be a promise the app does not keep, which `safety-rules.md` treats
+     * as the same class of defect as an overclaimed security property.
+     */
+    private val permissions: PermissionActions,
 ) {
 
     /** How an attempt ended, for the UI to report. */
@@ -118,21 +130,25 @@ class ActionRunner(
      * a condition `safety-rules.md` rule 1 names explicitly for the bulk
      * restore it permits.
      *
-     * Reports **per package**. A user told everything was put back when two
+     * Reports **per item**. A user told everything was put back when two
      * failed is worse off than one told exactly which two, so the message
      * always names the failures and never says a bare "done".
      */
     fun restoreEverything(onOutcome: (Outcome) -> Unit) = authenticated(
         title = "Put everything back",
         reason = "Undo every change Bulwark has made to this phone, returning " +
-            "each app to the state it was in before.",
+            "each app and permission to the state it was in before.",
         onOutcome = onOutcome,
     ) {
-        val steps = actions.restoreEverything()
+        // Both halves, one authentication, because putting everything back is
+        // one intent to the person who pressed it. Apps first: a permission
+        // grant against an app that is still switched off is the less useful
+        // order to fail in.
+        val steps = actions.restoreEverything() + permissions.restoreEverything()
         val failed = steps.filterNot { it.succeeded }
         when {
             steps.isEmpty() -> "Bulwark has not changed anything on this phone."
-            failed.isEmpty() -> "Put back all ${steps.size} app(s)."
+            failed.isEmpty() -> "Put back all ${steps.size} change(s)."
             // A partial restore is a FAILURE report, not a success with a
             // caveat. Routed through the failure path so it does not
             // auto-dismiss like good news - the user has to see which packages
@@ -141,10 +157,60 @@ class ActionRunner(
                 buildString {
                     append("Put back ${steps.size - failed.size} of ${steps.size}. ")
                     append("These are still changed and need a look: ")
-                    append(failed.joinToString(", ") { it.packageName })
+                    append(failed.joinToString(", ") { it.describe })
                     append(".")
                 }
             )
+        }
+    }
+
+    /**
+     * Authenticates once, then takes one permission away from chosen apps.
+     *
+     * The second exception to `safety-rules.md` rule 1, and every condition it
+     * sets is visible here:
+     *
+     * - **One permission**, because that is all `PermissionActions` can accept.
+     * - **The apps are passed in**, never matched. The screen collects ticks
+     *   that start empty; nothing here can widen the list.
+     * - **The system prompt names the capability and the count**, built by
+     *   `batchRevokePrompt` - the one piece of text in this flow that an
+     *   accessibility service cannot rewrite, which is why it is a tested pure
+     *   function and not a string assembled here.
+     * - **Reports per app.** A batch that stopped after three of ten must say
+     *   which three and that seven were untouched, never a bare count.
+     *
+     * One authentication for the whole batch, because it is one intent - the
+     * same reasoning the bulk restore already stands on.
+     */
+    fun revokeAcrossApps(
+        permission: String,
+        packageNames: List<String>,
+        onOutcome: (Outcome) -> Unit,
+    ) = authenticated(
+        title = "Take away ${wordsFor(permission).name}",
+        reason = batchRevokePrompt(permission, packageNames),
+        onOutcome = onOutcome,
+    ) {
+        val steps = permissions.revokeAcrossApps(permission, packageNames)
+        val done = steps.count { it.succeeded }
+        val stopped = steps.size < packageNames.distinct().size
+        val capability = wordsFor(permission).name.lowercase()
+
+        when {
+            // Stopped early: rule 6 fail-closed, unlike the restore. The user
+            // must be told what was left alone, or they will assume it applied
+            // to everything they chose.
+            stopped || done < steps.size -> throw PartialFailure(
+                buildString {
+                    append("Took $capability from $done of ${packageNames.distinct().size}. ")
+                    steps.lastOrNull { !it.succeeded }?.let {
+                        append("Stopped at ${it.packageName}: ${it.failure} ")
+                    }
+                    append("The rest were not changed.")
+                }
+            )
+            else -> "Took $capability from $done app(s)."
         }
     }
 

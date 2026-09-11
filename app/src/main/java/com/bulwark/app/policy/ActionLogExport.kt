@@ -1,5 +1,6 @@
 package com.bulwark.app.policy
 
+import com.bulwark.app.permissions.wordsFor
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -65,7 +66,7 @@ object ActionLogExport {
             appendLine("INTERRUPTED - ${interrupted.size} action(s) with no recorded outcome.")
             appendLine("Bulwark was stopped mid-change. These may or may not have applied;")
             appendLine("it does not know, and it will not guess. Check each one by hand:")
-            interrupted.forEach { appendLine("  - ${it.kind.humanVerb} ${it.packageName}") }
+            interrupted.forEach { appendLine("  - ${it.kind.humanVerb} ${it.subject}") }
             appendLine()
         }
 
@@ -85,11 +86,24 @@ object ActionLogExport {
         append("  ")
         append(kind.humanVerb.padEnd(VERB_WIDTH))
         append("  ")
-        append(packageName)
+        append(subject)
         if (userId != 0) append("  (user $userId)")
         previousState?.let { append("  [was enabled-state $it]") }
         detail?.let { append("  - $it") }
     }
+
+    /**
+     * What the action was done to: an app, or one permission of one app.
+     *
+     * Plain words plus the raw permission name, because this file has two
+     * readers with different needs - the user wants to know their microphone
+     * came back, the person reading the bug report wants the constant.
+     */
+    private val ActionRecord.subject: String
+        get() = when (permission) {
+            null -> packageName
+            else -> "$packageName  ${wordsFor(permission).name} [$permission]"
+        }
 
     private fun format(epochMillis: Long): String =
         SimpleDateFormat(TIMESTAMP_PATTERN, Locale.US)
@@ -107,6 +121,10 @@ internal val ActionKind.humanVerb: String
         ActionKind.ENABLE -> "switched back on"
         ActionKind.UNINSTALL -> "removed"
         ActionKind.INSTALL_EXISTING -> "restored"
+        // Said about a permission, so the sentence reads "took away
+        // com.example  Microphone" rather than naming a mechanism.
+        ActionKind.REVOKE_PERMISSION -> "took away"
+        ActionKind.GRANT_PERMISSION -> "gave back"
     }
 
 /** Reads as a status, not as an enum constant. */
