@@ -133,14 +133,29 @@ class ActionRunner(
         when {
             steps.isEmpty() -> "Bulwark has not changed anything on this phone."
             failed.isEmpty() -> "Put back all ${steps.size} app(s)."
-            else -> buildString {
-                append("Put back ${steps.size - failed.size} of ${steps.size}. ")
-                append("These are still changed and need a look: ")
-                append(failed.joinToString(", ") { it.packageName })
-                append(".")
-            }
+            // A partial restore is a FAILURE report, not a success with a
+            // caveat. Routed through the failure path so it does not
+            // auto-dismiss like good news - the user has to see which packages
+            // are still changed in order to do anything about them.
+            else -> throw PartialFailure(
+                buildString {
+                    append("Put back ${steps.size - failed.size} of ${steps.size}. ")
+                    append("These are still changed and need a look: ")
+                    append(failed.joinToString(", ") { it.packageName })
+                    append(".")
+                }
+            )
         }
     }
+
+    /**
+     * An operation that partly worked.
+     *
+     * Carries a message already written for a person, so [authenticated]
+     * reports it verbatim instead of prefixing an exception class name at
+     * someone who only wants to know which apps are still switched off.
+     */
+    private class PartialFailure(override val message: String) : Exception(message)
 
     /**
      * Runs [work] only after the user has authenticated out of process.
@@ -159,6 +174,8 @@ class ActionRunner(
                 try {
                     val message = withContext(Dispatchers.IO) { work() }
                     onOutcome(Outcome.Done(message))
+                } catch (partial: PartialFailure) {
+                    onOutcome(Outcome.Failed(partial.message))
                 } catch (refusal: SecurityException) {
                     onOutcome(Outcome.Refused(refusal.message ?: "Bulwark refused this."))
                 } catch (bad: IllegalArgumentException) {

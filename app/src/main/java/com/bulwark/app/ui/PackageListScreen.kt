@@ -2,6 +2,7 @@ package com.bulwark.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,6 +16,9 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -25,6 +29,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -59,6 +64,7 @@ import com.bulwark.app.shizuku.PrivilegedPackages
 import com.bulwark.app.shizuku.SpecialAccessReader
 import com.bulwark.app.shizuku.ShizukuState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -95,7 +101,8 @@ fun PackageListScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
     var onlyOffered by remember { mutableStateOf(false) }
-    var notice by remember { mutableStateOf<String?>(null) }
+    val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
     var access by remember { mutableStateOf<List<AppAccess>?>(null) }
     var accessSummary by remember { mutableStateOf<AuditSummary?>(null) }
     var accessUnavailable by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -108,11 +115,33 @@ fun PackageListScreen(
     var interrupted by remember { mutableStateOf<List<ActionRecord>>(emptyList()) }
 
     fun report(outcome: ActionRunner.Outcome) {
-        notice = when (outcome) {
+        val message = when (outcome) {
             is ActionRunner.Outcome.Done -> outcome.message
             is ActionRunner.Outcome.Refused -> outcome.why
-            is ActionRunner.Outcome.Failed -> "Did not work. ${outcome.why}"
+            // Already written for a person by ActionRunner; no prefix.
+            is ActionRunner.Outcome.Failed -> outcome.why
             ActionRunner.Outcome.Cancelled -> null
+        }
+        // A snackbar, not a card in the list. Hardware showed why: the outcome
+        // rendered as a list item appeared wherever that item sits, which after
+        // tapping "Put everything back" was off the top of the screen - and for
+        // a row action deep in 370 packages it would be hundreds of rows away.
+        // A result the user has to go looking for is not a result.
+        //
+        // A failure never auto-dismisses. The default four seconds is fine for
+        // "switched it off"; it is not fine for "this did not work", which the
+        // user has to see to act on. Rule 6 is report-and-stop, and a report
+        // that disappears on its own is neither.
+        message?.let { text ->
+            val failed = outcome is ActionRunner.Outcome.Failed ||
+                outcome is ActionRunner.Outcome.Refused
+            scope.launch {
+                snackbar.showSnackbar(
+                    message = text,
+                    withDismissAction = failed,
+                    duration = if (failed) SnackbarDuration.Indefinite else SnackbarDuration.Long,
+                )
+            }
         }
         // Re-read from the device rather than assuming the change landed.
         if (outcome is ActionRunner.Outcome.Done) reload++
@@ -197,7 +226,8 @@ fun PackageListScreen(
         }
     }
 
-    Column(modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    Box(modifier.fillMaxSize()) {
+      Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         Text(
             "Your phone",
             style = MaterialTheme.typography.headlineSmall,
@@ -226,10 +256,6 @@ fun PackageListScreen(
                 item(key = "interrupted") {
                     InterruptedCard(interrupted.map { it.packageName })
                 }
-            }
-
-            notice?.let { message ->
-                item(key = "notice") { NoticeCard(message) { notice = null } }
             }
 
             if (!ready) {
@@ -287,12 +313,26 @@ fun PackageListScreen(
                     Column {
                         TextButton(onClick = {
                             exporter.export { outcome ->
-                                notice = when (outcome) {
+                                val text = when (outcome) {
                                     is LogExporter.Outcome.Saved ->
                                         "Saved to ${outcome.where}."
                                     is LogExporter.Outcome.Failed ->
                                         "Could not save. ${outcome.why}"
                                     LogExporter.Outcome.Cancelled -> null
+                                }
+                                text?.let { t ->
+                                    val bad = outcome is LogExporter.Outcome.Failed
+                                    scope.launch {
+                                        snackbar.showSnackbar(
+                                            message = t,
+                                            withDismissAction = bad,
+                                            duration = if (bad) {
+                                                SnackbarDuration.Indefinite
+                                            } else {
+                                                SnackbarDuration.Long
+                                            },
+                                        )
+                                    }
                                 }
                             }
                         }) { Text("Export what Bulwark changed") }
@@ -342,6 +382,9 @@ fun PackageListScreen(
                 PackageRow(entry, runner, ::report)
             }
         }
+      }
+
+      SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
     }
 }
 
@@ -445,16 +488,6 @@ private fun InterruptedCard(packages: List<String>) {
                     color = CautionText,
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun NoticeCard(text: String, onDismiss: () -> Unit) {
-    Card {
-        Column(Modifier.padding(14.dp)) {
-            Text(text, style = MaterialTheme.typography.bodyMedium)
-            TextButton(onClick = onDismiss) { Text("OK") }
         }
     }
 }
