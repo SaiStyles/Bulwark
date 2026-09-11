@@ -15,12 +15,13 @@ import android.os.Build
  * above it in `policy/`, and this stays the dumbest possible layer so that the
  * guard cannot be satisfied by the thing it is guarding.
  *
- * ## Unverified on hardware
+ * ## Proven on hardware
  *
- * Every call in this file is **UNVERIFIED** as of 2026-09-10. Enumeration was
- * proven on the Agni 2; mutation has never run. The last new privileged call
- * cost a failed hardware run to get right, so nothing here should be described
- * as working until it has been watched working.
+ * Watched working on the Agni 2, 2026-09-10, against `com.android.egg`:
+ * `0` -> `3` -> `0`, surviving a reboot. Unlike `getInstalledPackages`, these
+ * calls went through `HiddenApiBypass.invoke` first try - the signature has
+ * been `(String, int, int, int, String)` since well before minSdk 26, so there
+ * is no long/int split to branch on.
  */
 object PackageState {
 

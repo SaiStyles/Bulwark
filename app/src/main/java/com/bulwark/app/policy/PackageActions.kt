@@ -36,11 +36,12 @@ import com.bulwark.app.shizuku.PackageState
  * forbids it and the absence of the method is the enforcement: forty changes
  * at once means nobody can tell which one broke the phone.
  *
- * ## Unverified on hardware
+ * ## Proven on hardware
  *
- * Marked 2026-09-10. The composition is unit-tested; the privileged calls
- * underneath it have never run. Nothing here may be described as working until
- * it has been watched working on the Agni 2 (`safety-rules.md` rule 7).
+ * Watched working on the Agni 2, 2026-09-10: read state, disable (`0` -> `3`),
+ * restore (`3` -> `0`, not `1`), correct log, survives reboot. Evidence in
+ * `context/devices/lava-agni-2.md`, including the UI bug that run exposed and
+ * fifteen passing unit tests did not.
  */
 class PackageActions(
     private val journal: ActionJournal,
