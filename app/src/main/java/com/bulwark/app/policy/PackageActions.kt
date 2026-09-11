@@ -32,9 +32,14 @@ import com.bulwark.app.shizuku.PackageState
  * convention, and conventions decay - so it is asserted at the one call site
  * rather than hoped for, and the call site is small enough to read in full.
  *
- * **Bulk anything.** There is no `disableAll`. `safety-rules.md` rule 1
- * forbids it and the absence of the method is the enforcement: forty changes
- * at once means nobody can tell which one broke the phone.
+ * **Bulk *apply*.** There is no `disableAll`. `safety-rules.md` rule 1 forbids
+ * it and the absence of the method is the enforcement: forty changes at once
+ * means nobody can tell which one broke the phone.
+ *
+ * Bulk **restore** is allowed and lives in [restoreEverything] - rule 1 was
+ * amended for it on 2026-09-11, in writing rather than by drifting. Undoing
+ * accumulated change is the opposite of accumulating it, and a user who has to
+ * reverse thirty things by hand is not being kept safe.
  *
  * ## Proven on hardware
  *
@@ -145,6 +150,60 @@ class PackageActions(
         return history.lastOrNull {
             it.kind == ActionKind.DISABLE && it.phase == Phase.ATTEMPTED && it.id in closed
         }?.previousState
+    }
+
+    /** What happened to one package during [restoreEverything]. */
+    data class RestoreStep(
+        val packageName: String,
+        val succeeded: Boolean,
+        /** Why it failed, in the platform's words. Null on success. */
+        val failure: String? = null,
+    )
+
+    /**
+     * Puts every package Bulwark changed back to the state it found.
+     *
+     * The one bulk operation that exists, and only because it is a *restore*:
+     * see `safety-rules.md` rule 1, amended 2026-09-11 with the reasoning and
+     * the conditions this method has to satisfy.
+     *
+     * ## Continues past a failure, on purpose
+     *
+     * Rule 6 says fail closed, and for a destructive action that is right -
+     * stopping leaves less of the phone changed. Here it is backwards:
+     * stopping halfway through a restore leaves *more* of the phone changed
+     * than finishing. So each package is attempted, each result is recorded,
+     * and **the caller is handed every outcome** rather than a boolean.
+     *
+     * The honesty condition rule 1 imposes is that this never reports a bare
+     * "done". A user told everything was put back when two packages failed is
+     * worse off than one told exactly which two.
+     *
+     * Newest first, from [undoPlan] - undo is a stack, and restoring in
+     * insertion order can put a dependency back before the thing that needed
+     * it.
+     *
+     * @return one [RestoreStep] per package, in the order attempted. Empty
+     *   when Bulwark has changed nothing.
+     */
+    fun restoreEverything(userId: Int = 0): List<RestoreStep> {
+        val history = journal.history()
+        // One entry per package: restoring a package twice is pointless, and
+        // the second attempt would undo the first.
+        val packages = history.undoPlan().map { it.packageName }.distinct()
+
+        return packages.map { packageName ->
+            runCatching { switchBackOn(packageName, userId) }.fold(
+                onSuccess = { RestoreStep(packageName, succeeded = true) },
+                onFailure = {
+                    RestoreStep(
+                        packageName,
+                        succeeded = false,
+                        failure = "${it::class.java.simpleName}: ${it.message}",
+                    )
+                },
+            )
+        }
     }
 
     /**

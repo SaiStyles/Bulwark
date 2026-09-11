@@ -112,6 +112,37 @@ class ActionRunner(
     }
 
     /**
+     * Authenticates once, then puts every changed package back.
+     *
+     * One authentication for the whole operation, because it is one intent -
+     * a condition `safety-rules.md` rule 1 names explicitly for the bulk
+     * restore it permits.
+     *
+     * Reports **per package**. A user told everything was put back when two
+     * failed is worse off than one told exactly which two, so the message
+     * always names the failures and never says a bare "done".
+     */
+    fun restoreEverything(onOutcome: (Outcome) -> Unit) = authenticated(
+        title = "Put everything back",
+        reason = "Undo every change Bulwark has made to this phone, returning " +
+            "each app to the state it was in before.",
+        onOutcome = onOutcome,
+    ) {
+        val steps = actions.restoreEverything()
+        val failed = steps.filterNot { it.succeeded }
+        when {
+            steps.isEmpty() -> "Bulwark has not changed anything on this phone."
+            failed.isEmpty() -> "Put back all ${steps.size} app(s)."
+            else -> buildString {
+                append("Put back ${steps.size - failed.size} of ${steps.size}. ")
+                append("These are still changed and need a look: ")
+                append(failed.joinToString(", ") { it.packageName })
+                append(".")
+            }
+        }
+    }
+
+    /**
      * Runs [work] only after the user has authenticated out of process.
      *
      * [work] returns the message to show. It runs off the main thread: every

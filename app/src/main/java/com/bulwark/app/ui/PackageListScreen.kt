@@ -268,6 +268,19 @@ fun PackageListScreen(
             }
 
             if (exportable) {
+                // The one bulk operation Bulwark has, and only because it is a
+                // restore - see safety-rules.md rule 1, amended 2026-09-11.
+                // Offered next to the export because they answer the same
+                // question: what did this app do to my phone, and can I take
+                // it back?
+                item(key = "restore") {
+                    TextButton(onClick = {
+                        runner.restoreEverything { report(it) }
+                    }) { Text("Put everything back") }
+                }
+            }
+
+            if (exportable) {
                 // Rule 5: the record must be exportable in fact, not only in
                 // principle. Offered once there is something to export.
                 item(key = "export") {

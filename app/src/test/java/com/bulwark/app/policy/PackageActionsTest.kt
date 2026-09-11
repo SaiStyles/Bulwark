@@ -20,6 +20,8 @@ class PackageActionsTest {
     private class FakeState(
         initial: Map<String, Int> = emptyMap(),
         var failOnSet: Boolean = false,
+        /** Fail only these, so partial-failure paths can be driven. */
+        var failFor: Set<String> = emptySet(),
     ) : PackageActions.StateAccess {
         val states = initial.toMutableMap()
         val reads = mutableListOf<String>()
@@ -31,7 +33,7 @@ class PackageActionsTest {
         }
 
         override fun set(packageName: String, state: Int, userId: Int, callingPackage: String) {
-            if (failOnSet) error("Shizuku died")
+            if (failOnSet || packageName in failFor) error("Shizuku died")
             writes += Triple(packageName, state, callingPackage)
             states[packageName] = state
         }
@@ -257,14 +259,103 @@ class PackageActionsTest {
     }
 
     @Test
-    fun `there is no bulk method to call`() {
-        // safety-rules.md rule 1 forbids "remove everything matching a
-        // pattern". The absence of the method is the enforcement, so this
-        // asserts the absence rather than trusting a comment.
-        val forbidden = listOf("all", "batch", "bulk", "each", "every")
+    fun `there is no bulk APPLY method, and restore is the only exception`() {
+        // Rule 1 forbids bulk changes; it was amended on 2026-09-11 to permit
+        // bulk *restore* only, in writing. This test is where that exception
+        // stays honest - the shape is still guarded, and the allowlist has
+        // exactly one entry.
+        val bulkShaped = listOf("all", "batch", "bulk", "each", "every")
+        val allowed = setOf("restoreEverything")
+
         val offenders = PackageActions::class.java.declaredMethods
+            // Kotlin emits `name$default` bridges for default arguments. They
+            // are not API and tripped this guard on the first run.
+            .filterNot { it.isSynthetic }
             .map { it.name }
-            .filter { name -> forbidden.any { name.contains(it, ignoreCase = true) } }
-        assertTrue("no bulk operations may exist; found: $offenders", offenders.isEmpty())
+            .filter { name -> bulkShaped.any { name.contains(it, ignoreCase = true) } }
+            .filterNot { it in allowed }
+
+        assertTrue("no bulk apply may exist; found: $offenders", offenders.isEmpty())
     }
+
+    @Test
+    fun `restoreEverything puts back everything that was changed`() {
+        val state = FakeState(
+            mapOf("com.a" to PackageState.ENABLED, "com.b" to PackageState.DEFAULT),
+        )
+        val (act, _) = actions(state)
+        act.disable("com.a")
+        act.disable("com.b")
+
+        val steps = act.restoreEverything()
+
+        assertEquals(2, steps.size)
+        assertTrue("all should have succeeded", steps.all { it.succeeded })
+        assertEquals(PackageState.ENABLED, state.states["com.a"])
+        assertEquals("must restore DEFAULT, not ENABLED", PackageState.DEFAULT, state.states["com.b"])
+    }
+
+    @Test
+    fun `restoreEverything works newest first`() {
+        // Undo is a stack. Restoring in insertion order can put a dependency
+        // back before the thing that needed it.
+        val state = FakeState(
+            mapOf("com.first" to PackageState.ENABLED, "com.second" to PackageState.ENABLED),
+        )
+        val (act, _) = actions(state)
+        act.disable("com.first")
+        act.disable("com.second")
+
+        assertEquals(
+            listOf("com.second", "com.first"),
+            act.restoreEverything().map { it.packageName },
+        )
+    }
+
+    @Test
+    fun `restoreEverything continues past a failure and reports it`() {
+        // Rule 6 says fail closed, and for a destructive action that is right.
+        // Here it is backwards: stopping halfway through a restore leaves MORE
+        // of the phone changed than finishing does.
+        val state = FakeState(
+            mapOf("com.a" to PackageState.ENABLED, "com.b" to PackageState.ENABLED),
+        )
+        val (act, _) = actions(state)
+        act.disable("com.a")
+        act.disable("com.b")
+
+        state.failFor = setOf("com.a")
+        val steps = act.restoreEverything()
+
+        assertEquals("must attempt both", 2, steps.size)
+        val failed = steps.single { !it.succeeded }
+        assertEquals("com.a", failed.packageName)
+        assertTrue("must say why: ${failed.failure}", failed.failure!!.contains("Shizuku died"))
+        assertTrue("the other must still have been restored", steps.single { it.succeeded }.packageName == "com.b")
+        assertEquals(PackageState.ENABLED, state.states["com.b"])
+    }
+
+    @Test
+    fun `restoreEverything touches each package once`() {
+        // Restoring a package twice would undo the first restore.
+        val state = FakeState(mapOf("com.a" to PackageState.ENABLED))
+        val (act, _) = actions(state)
+        act.disable("com.a")
+        act.switchBackOn("com.a")
+        act.disable("com.a")
+
+        val steps = act.restoreEverything()
+
+        assertEquals(1, steps.size)
+        assertEquals(PackageState.ENABLED, state.states["com.a"])
+    }
+
+    @Test
+    fun `restoreEverything on an untouched phone does nothing and says so`() {
+        val state = FakeState()
+        val (act, _) = actions(state)
+        assertTrue(act.restoreEverything().isEmpty())
+        assertTrue("must not have touched anything", state.writes.isEmpty())
+    }
+
 }
