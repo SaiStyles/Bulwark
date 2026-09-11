@@ -319,14 +319,16 @@ class ActionRunner(
             val rules = withContext(Dispatchers.IO) {
                 runCatching { firewall.blocked() }.getOrDefault(emptySet())
             }
-            if (rules.isNotEmpty()) {
-                val consent = Firewall.consentIntent(activity)
-                if (consent != null) {
-                    vpnConsent.launch(consent)
-                    return@launch
-                }
+            if (rules.isEmpty()) {
+                Firewall.stop(activity)
+                return@launch
             }
-            Firewall.apply(activity, rules)
+            val consent = Firewall.consentIntent(activity)
+            if (consent != null) {
+                vpnConsent.launch(consent)
+                return@launch
+            }
+            Firewall.sync(activity)
         }
     }
 

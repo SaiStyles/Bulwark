@@ -2,6 +2,9 @@ package com.bulwark.app.firewall
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.bulwark.app.policy.ActionJournal
+import com.bulwark.app.policy.FirewallActions
+import com.bulwark.app.policy.SqliteActionLog
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -54,15 +57,22 @@ class TunnelOnHardware {
             !Firewall.needsConsent(context),
         )
 
+        // A real rule in the real log, because that is now where the service
+        // looks. Writing one here also exercises the path the screen uses.
+        val rules = FirewallActions(ActionJournal(SqliteActionLog(context))) { false }
+
         try {
-            Firewall.apply(context, setOf(TARGET))
+            rules.block(TARGET)
+            Firewall.sync(context)
             assertTrue(
                 "the tunnel should be up within $WAIT_MS ms",
                 waitFor(expected = true),
             )
         } finally {
-            // Always put the phone back, even if the assertion above failed.
-            Firewall.apply(context, emptySet())
+            // Always put the phone back, even if the assertion above failed:
+            // the rule goes first, so a later sync cannot revive the block.
+            rules.allow(TARGET)
+            Firewall.stop(context)
         }
 
         // waitFor returns whether the state was REACHED, so this is assertTrue

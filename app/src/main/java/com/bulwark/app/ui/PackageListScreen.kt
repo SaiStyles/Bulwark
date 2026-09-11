@@ -125,6 +125,7 @@ fun PackageListScreen(
     var blockedApps by remember { mutableStateOf<Set<String>>(emptySet()) }
     var firewallConsentNeeded by remember { mutableStateOf(false) }
     var aVpnIsUp by remember { mutableStateOf(false) }
+    var alwaysOn by remember { mutableStateOf(false) }
     // Null means "could not tell", never "none" - see originLabelFor.
     var systemPackages by remember { mutableStateOf<Set<String>?>(null) }
     // Capabilities whose flag read has come back. Until a permission is in
@@ -256,6 +257,7 @@ fun PackageListScreen(
         blockedApps = rules
         firewallConsentNeeded = Firewall.needsConsent(context)
         aVpnIsUp = Firewall.ourTunnelIsUp()
+        alwaysOn = Firewall.alwaysOnHoldsOurTunnel(context)
         if (rules.isNotEmpty()) runner.syncFirewall()
     }
 
@@ -317,6 +319,10 @@ fun PackageListScreen(
                         ruleCount = blockedApps.size,
                         consentNeeded = firewallConsentNeeded,
                         vpnUp = aVpnIsUp,
+                        alwaysOn = alwaysOn,
+                        onOpenVpnSettings = {
+                            runCatching { context.startActivity(Firewall.vpnSettings()) }
+                        },
                     )
                 }
             }
@@ -510,7 +516,13 @@ fun PackageListScreen(
  * happens after every restart and must never be softened into "paused".
  */
 @Composable
-private fun FirewallCard(ruleCount: Int, consentNeeded: Boolean, vpnUp: Boolean) {
+private fun FirewallCard(
+    ruleCount: Int,
+    consentNeeded: Boolean,
+    vpnUp: Boolean,
+    alwaysOn: Boolean,
+    onOpenVpnSettings: () -> Unit,
+) {
     val state = firewallState(ruleCount, consentNeeded, vpnUp)
 
     // Colour carries the state rather than decorating it. A firewall that is
@@ -532,8 +544,14 @@ private fun FirewallCard(ruleCount: Int, consentNeeded: Boolean, vpnUp: Boolean)
             // lockdownOn is false until Bulwark can read it. Claiming the gap
             // is closed when it has not been checked would be the exact
             // failure this card exists to prevent.
-            firewallDetail(state, lockdownOn = false)?.let {
+            firewallDetail(state, lockdownOn = alwaysOn)?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = textColour)
+            }
+            // The way to close the gap, next to the sentence describing it -
+            // not in a help page nobody opens. Bulwark cannot flip this itself;
+            // Android reserves it for the user, rightly.
+            if (!alwaysOn) {
+                TextButton(onClick = onOpenVpnSettings) { Text("Open VPN settings") }
             }
         }
     }

@@ -4,6 +4,9 @@ import android.content.Intent
 import android.net.VpnService
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import com.bulwark.app.policy.ActionJournal
+import com.bulwark.app.policy.SqliteActionLog
+import com.bulwark.app.policy.blockedPackages
 import java.io.FileInputStream
 import kotlin.concurrent.thread
 
@@ -46,6 +49,29 @@ class NetworkBlockService : VpnService() {
     private var tunnel: ParcelFileDescriptor? = null
     private var drain: Thread? = null
 
+    /**
+     * Reads its own rules. **Never takes them from the caller.**
+     *
+     * The first version was handed the blocked list in the starting Intent,
+     * which worked for exactly one case: Bulwark starting the service itself.
+     * It broke silently for the two that matter most.
+     *
+     * - **Always-on VPN.** Android starts the service at boot, with no Intent
+     *   of ours and no extras. The old code read an empty list, concluded
+     *   there was nothing to block, and shut itself down - so the one feature
+     *   that closes the reboot gap could never have worked.
+     * - **START_STICKY.** When Android restarts a killed service the Intent is
+     *   null, so the "rules come back after a kill" behaviour this file claims
+     *   would have come back and immediately quit.
+     *
+     * Both were found by walking through a reboot out loud rather than by any
+     * test, which is worth remembering: the bug was in what happens when
+     * *something else* starts us, and everything written here had assumed we
+     * were the one doing the starting.
+     *
+     * So the service now asks the log, which is the same source the screen
+     * reads and the only place the rules ever live.
+     */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             teardown()
@@ -53,25 +79,37 @@ class NetworkBlockService : VpnService() {
             return START_NOT_STICKY
         }
 
-        val blocked = intent?.getStringArrayListExtra(EXTRA_BLOCKED).orEmpty()
+        // The log is a database and this is the main thread. Reading it here
+        // would trip the debug build's own main-thread check, and deservedly.
+        thread(name = "bulwark-rules", isDaemon = true) { applyRulesFromLog() }
+
+        // START_STICKY so a killed service comes back. It means something now:
+        // the restart arrives with a null Intent, and the rules are read from
+        // the log rather than expected in extras.
+        return START_STICKY
+    }
+
+    /** Reads the rules and brings the tunnel into line with them. */
+    private fun applyRulesFromLog() {
+        val blocked = runCatching {
+            ActionJournal(SqliteActionLog(applicationContext)).history().blockedPackages()
+        }.getOrElse {
+            Log.w(TAG, "could not read rules: ${it.javaClass.simpleName}")
+            return
+        }
+
         if (blocked.isEmpty()) {
             // Nothing to block is not a reason to hold the device's only VPN
             // slot. Bulwark gets out of the way rather than sitting there
-            // looking busy.
+            // looking busy, which would break a real VPN for nothing.
             teardown()
             stopSelf()
-            return START_NOT_STICKY
+            return
         }
 
         teardown()
-        tunnel = establish(blocked)
-
-        // START_STICKY, not START_NOT_STICKY: if Android kills this under
-        // memory pressure the rules should come back rather than silently
-        // lapsing. It is not a guarantee - nothing here is - but a firewall
-        // that gives up quietly is the failure mode this layer is most
-        // concerned with.
-        return if (tunnel == null) START_NOT_STICKY else START_STICKY
+        tunnel = establish(blocked.toList())
+        if (tunnel == null) stopSelf()
     }
 
     /**
@@ -185,6 +223,5 @@ class NetworkBlockService : VpnService() {
         private const val BUFFER_BYTES = 32767
 
         const val ACTION_STOP = "com.bulwark.app.firewall.STOP"
-        const val EXTRA_BLOCKED = "blocked"
     }
 }
