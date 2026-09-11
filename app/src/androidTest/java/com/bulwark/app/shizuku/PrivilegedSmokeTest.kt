@@ -230,6 +230,37 @@ class PrivilegedSmokeTest {
         assertEquals(Revocable.NOT_RUNTIME, biometric.revocable())
     }
 
+    @Test
+    fun aSystemFixedPermissionIsReadAsFixed() {
+        requireShizuku()
+
+        // `dumpsys package com.android.egg` on this device reports
+        // POST_NOTIFICATIONS as granted with flags SYSTEM_FIXED|GRANTED_BY_DEFAULT,
+        // and a `pm revoke` against it on 2026-09-11 returned success and
+        // changed nothing. So this is the check that Bulwark's flag bit values
+        // still mean what the platform means by them: if SYSTEM_FIXED had
+        // drifted, this row would come back offerable and Bulwark would put a
+        // button on screen that the platform ignores.
+        //
+        // **Device-specific expectation.** It is an observation about the Agni
+        // 2, which is this project's declared gate. A failure here on some
+        // other phone may mean the egg simply is not fixed there - check
+        // `dumpsys` before believing the code is wrong.
+        val holdings = RuntimePermissionAccess.holdings(
+            "com.android.egg", context.packageManager,
+        )
+        val post = holdings.firstOrNull {
+            it.permission == "android.permission.POST_NOTIFICATIONS"
+        }
+
+        assertTrue("the egg requests POST_NOTIFICATIONS on this device", post != null)
+        assertTrue("dumpsys says it is granted", post!!.isGranted)
+        assertEquals(
+            "flags=${post.flags}: dumpsys says SYSTEM_FIXED, so Bulwark must not offer it",
+            Revocable.FIXED_BY_SYSTEM, post.revocable(),
+        )
+    }
+
     private companion object {
         const val BINDER_WAIT_MS = 5_000L
         const val POLL_MS = 250L

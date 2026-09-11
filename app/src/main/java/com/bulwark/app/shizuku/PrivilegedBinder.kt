@@ -68,32 +68,6 @@ internal object PrivilegedBinder {
         invokeHidden(Class.forName(PM_INTERFACE), service, name, *args)
 
     /**
-     * The parameter lists of every declared method called [name] on [clazz],
-     * hidden ones included.
-     *
-     * **Discovery, not invocation.** The permission API changed both its
-     * service and its signature between Android 11 and 15, and the variants
-     * differ only in how many strings they take. Guessing which one a device
-     * has means either a `NoSuchMethodError` or - worse - a call that matches
-     * by type and means something else. Reading the parameter types off the
-     * device answers it, and a shape outside the table is refused rather than
-     * approximated (`RuntimePermissionAccess`).
-     *
-     * Same version split as [invokeHidden] and for the same reason: before
-     * Android 9 there is no blocklist, so ordinary reflection already sees
-     * everything.
-     */
-    fun declaredParameterTypes(clazz: Class<*>, name: String): List<List<Class<*>>> {
-        val methods: List<java.lang.reflect.Executable> =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                HiddenApiBypass.getDeclaredMethods(clazz).filterIsInstance<java.lang.reflect.Executable>()
-            } else {
-                clazz.declaredMethods.toList()
-            }
-        return methods.filter { it.name == name }.map { it.parameterTypes.toList() }
-    }
-
-    /**
      * Calls a non-SDK method, using the bypass only where one is needed.
      *
      * **API 28+** - `HiddenApiBypass.invoke`. The non-SDK blocklist exists and

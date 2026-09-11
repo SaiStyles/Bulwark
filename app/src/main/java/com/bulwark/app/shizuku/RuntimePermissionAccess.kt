@@ -30,26 +30,32 @@ import rikka.shizuku.SystemServiceHelper
  * wrong guess type-checks, runs, and answers a question about a package that
  * does not exist.
  *
- * So the shape is read off the device with
- * [PrivilegedBinder.declaredParameterTypes] and matched against the table in
- * [Flavour]. A shape that is not in the table means **no revoke is offered on
- * this device at all** - see [canChangePermissions]. That is guardrail 1 in
+ * ## Enumeration was the obvious answer and it kills the process
+ *
+ * The first version read the parameter types off the device and matched them
+ * against a table. On the Agni 2 that **crashed with SIGSEGV inside
+ * `Unsafe_getObject`** - `HiddenApiBypass.getDeclaredMethods` walking an
+ * interface that plain reflection reports as having *zero* declared methods.
+ * A native crash cannot be caught, so `runCatching` around it bought nothing
+ * and the app would have died on the screen that called it.
+ *
+ * So the shape is established by **calling**, not by looking. Each candidate
+ * in [SHAPES] is tried against `getPermissionFlags` until one resolves;
+ * `NoSuchMethodException` means try the next. A device where none resolve gets
+ * **no revoke offered at all** - guardrail 1 in
  * `context/layers/02-permissions.md`: an action whose undo cannot be resolved
- * is not a reversible action, and shipping it as one would be the false sense
- * of protection `safety-rules.md` calls worse than none.
+ * is not reversible, and shipping it as one would be the false sense of
+ * protection `safety-rules.md` calls worse than none.
  *
- * The flavour is decided by the **read** call, never by trying a write.
- * `getPermissionFlags` changes nothing, so probing it costs nothing and rules
- * out no-op writes; rule 6 forbids feeling our way through destructive calls.
+ * Probing uses the **read** call and never a write. `getPermissionFlags`
+ * changes nothing, so trying four argument lists costs nothing; rule 6 forbids
+ * feeling our way through destructive calls.
  *
- * ## UNVERIFIED ON HARDWARE
- *
- * Every other privileged path in this package has been watched working on the
- * Agni 2. This one has not: the 2026-09-11 spike proved `pm revoke` and
- * `pm grant` work at uid 2000 **through the shell**, which does not prove this
- * binder path resolves the same methods. `PrivilegedSmokeTest` has a read-only
- * check that names the resolved flavour, and `NOW.md` carries it as the next
- * hardware action.
+ * It also probes on the **raw binder, unprivileged**. An unprivileged call
+ * that reaches the permission check throws `SecurityException`, which proves
+ * the method resolved just as well as a success does - so the shape is known
+ * even with Shizuku dead, and the screen can say honestly what it will be able
+ * to do before anyone is asked to set anything up.
  *
  * ## Threading
  *
@@ -64,37 +70,80 @@ internal object RuntimePermissionAccess {
     /** The name `PermissionManagerService` registers with, not `"permission"`. */
     private const val PERMISSION_SERVICE = "permissionmgr"
 
-    private val STRING: Class<*> = String::class.java
-    private val INT: Class<*> = Int::class.javaPrimitiveType!!
-
     /**
-     * Which generation of the permission API this device carries.
+     * The argument shapes the permission calls come in, newest first.
      *
-     * Named by what is actually being distinguished - where the methods live
-     * and what they take - rather than by Android version, because OEM builds
-     * do not always match the release they claim.
+     * **Observed on the Agni 2, Android 15, 2026-09-11** for
+     * [DEVICE_AWARE_PERMISSION_MANAGER] - each one confirmed by calling it
+     * unprivileged and reading which way it failed. The other two come from the
+     * platform's history and are **unconfirmed**: no device here runs them.
+     * They are tried after the observed one, and a wrong guess costs a
+     * `NoSuchMethodException` rather than a wrong answer.
+     *
+     * The detail a table written from documentation got wrong: on Android 15
+     * `revokeRuntimePermission` takes its **reason after the user id**, not
+     * before it. A rule like "the int is last" builds
+     * `(pkg, perm, deviceId, reason, userId)`, which does not resolve here at
+     * all - and on some other build might resolve and mean something else.
      */
     enum class Flavour {
         /**
-         * `IPermissionManager` with a virtual-device parameter. Introduced when
-         * permissions became per-device; the extra `String` is a persistent
-         * device id, not a reason.
+         * `IPermissionManager` with a virtual-device parameter.
+         *
+         *     getPermissionFlags(pkg, perm, deviceId, userId)
+         *     grantRuntimePermission(pkg, perm, deviceId, userId)
+         *     revokeRuntimePermission(pkg, perm, deviceId, userId, reason)
          */
         DEVICE_AWARE_PERMISSION_MANAGER,
 
-        /** `IPermissionManager`, no device parameter. Android 11 to 13. */
+        /**
+         * `IPermissionManager`, no device parameter. Android 11 to 13.
+         * **Unconfirmed on hardware.**
+         *
+         *     getPermissionFlags(pkg, perm, userId)
+         *     grantRuntimePermission(pkg, perm, userId)
+         *     revokeRuntimePermission(pkg, perm, userId, reason)
+         */
         PERMISSION_MANAGER,
 
         /**
-         * `IPackageManager`, the pre-Android-11 home.
+         * `IPackageManager`, the pre-Android-11 home. **Unconfirmed.**
          *
          * **`getPermissionFlags` here takes (permission, package)** - the
          * reverse of every other call in this file. Getting it backwards reads
          * the flags of a package named `android.permission.CAMERA`, which does
          * not exist, which reads as "no flags set", which reads as "safe to
          * offer". A silent wrong answer in the direction of acting.
+         *
+         *     getPermissionFlags(perm, pkg, userId)
+         *     grantRuntimePermission(pkg, perm, userId)
+         *     revokeRuntimePermission(pkg, perm, userId)
          */
         LEGACY_PACKAGE_MANAGER,
+        ;
+
+        fun flagsArgs(packageName: String, permission: String, userId: Int): Array<Any?> =
+            when (this) {
+                DEVICE_AWARE_PERMISSION_MANAGER ->
+                    arrayOf(packageName, permission, deviceId(), userId)
+                PERMISSION_MANAGER -> arrayOf(packageName, permission, userId)
+                LEGACY_PACKAGE_MANAGER -> arrayOf(permission, packageName, userId)
+            }
+
+        fun grantArgs(packageName: String, permission: String, userId: Int): Array<Any?> =
+            when (this) {
+                DEVICE_AWARE_PERMISSION_MANAGER ->
+                    arrayOf(packageName, permission, deviceId(), userId)
+                else -> arrayOf(packageName, permission, userId)
+            }
+
+        fun revokeArgs(packageName: String, permission: String, userId: Int): Array<Any?> =
+            when (this) {
+                DEVICE_AWARE_PERMISSION_MANAGER ->
+                    arrayOf(packageName, permission, deviceId(), userId, REASON)
+                PERMISSION_MANAGER -> arrayOf(packageName, permission, userId, REASON)
+                LEGACY_PACKAGE_MANAGER -> arrayOf(packageName, permission, userId)
+            }
     }
 
     /** The resolved API, or null when this device has none we recognise. */
@@ -105,17 +154,18 @@ internal object RuntimePermissionAccess {
     private var resolutionAttempted = false
 
     /**
-     * The flavour this device has, resolved once.
+     * The flavour this device has, resolved once by trying the read call.
      *
-     * Cached because the answer cannot change while the process lives - it is
-     * a property of the platform image. Nothing here is a binder, so this does
-     * not reintroduce the held-service problem `security.md` FIXED-9 removed.
+     * Cached because the answer cannot change while the process lives - it is a
+     * property of the platform image. The cached value is a plain enum, not a
+     * binder, so this does not reintroduce the held-service problem
+     * `security.md` FIXED-9 removed.
      */
     fun flavour(): Flavour? {
         if (resolutionAttempted) return resolved
         synchronized(this) {
             if (resolutionAttempted) return resolved
-            resolved = resolve()
+            resolved = runCatching { resolve() }.getOrNull()
             resolutionAttempted = true
         }
         return resolved
@@ -125,38 +175,57 @@ internal object RuntimePermissionAccess {
      * Whether Bulwark may offer permission changes on this device.
      *
      * Read this **before drawing a revoke control**, not after pressing it.
-     * Needs no Shizuku: it inspects class metadata, so the screen can say
-     * honestly what it will and will not be able to do before the user goes
-     * anywhere near the onboarding.
+     * Needs no Shizuku - the probe runs against the raw binder, and a refusal
+     * proves as much as a success - so the screen can say honestly what it will
+     * be able to do before anyone is asked to set anything up.
      */
     val canChangePermissions: Boolean get() = flavour() != null
 
+    /**
+     * Tries each shape's **read** call until one resolves.
+     *
+     * Probes with Bulwark's own package and a permission it declares, so the
+     * question put to the platform is about us and nobody else.
+     *
+     * `NoSuchMethodException` means this shape is not what the device has, so
+     * move on. **Anything else means it resolved** - including the
+     * `SecurityException` an unprivileged probe earns, which is the expected
+     * outcome when Shizuku is not running and is just as good an answer.
+     */
     private fun resolve(): Flavour? {
-        val permissionManager = runCatching { Class.forName(PERMISSION_INTERFACE) }.getOrNull()
-        if (permissionManager != null) {
-            val shapes = runCatching {
-                PrivilegedBinder.declaredParameterTypes(permissionManager, "getPermissionFlags")
-            }.getOrDefault(emptyList())
-            // (package, permission, persistentDeviceId, userId)
-            if (shapes.any { it == listOf(STRING, STRING, STRING, INT) }) {
-                return Flavour.DEVICE_AWARE_PERMISSION_MANAGER
+        Flavour.entries.forEach { flavour ->
+            val service = runCatching { probeService(flavour) }.getOrNull() ?: return@forEach
+            val clazz = runCatching { interfaceClass(flavour) }.getOrNull() ?: return@forEach
+            val outcome = runCatching {
+                PrivilegedBinder.invokeHidden(
+                    clazz, service, "getPermissionFlags",
+                    *flavour.flagsArgs(OUR_PACKAGE, PROBE_PERMISSION, 0),
+                )
             }
-            // (package, permission, userId)
-            if (shapes.any { it == listOf(STRING, STRING, INT) }) {
-                return Flavour.PERMISSION_MANAGER
-            }
+            if (outcome.isSuccess) return flavour
+            val cause = generateSequence(outcome.exceptionOrNull()) { it.cause }.last()
+            val unresolved = cause is NoSuchMethodException || cause is NoSuchMethodError
+            if (!unresolved) return flavour
         }
-
-        val packageManager = runCatching { Class.forName(PrivilegedBinder.PM_INTERFACE) }.getOrNull()
-            ?: return null
-        val legacy = runCatching {
-            PrivilegedBinder.declaredParameterTypes(packageManager, "getPermissionFlags")
-        }.getOrDefault(emptyList())
-        // (permission, package, userId) - reversed, see LEGACY_PACKAGE_MANAGER.
-        if (legacy.any { it == listOf(STRING, STRING, INT) }) return Flavour.LEGACY_PACKAGE_MANAGER
-
         // Nothing recognised. Refuse rather than approximate.
         return null
+    }
+
+    /**
+     * A service object for probing: the **raw** binder, deliberately.
+     *
+     * Shizuku may not be running when the screen first asks whether permission
+     * changes are possible, and the answer must not depend on that. An
+     * unprivileged probe is refused by the system *after* the method resolves,
+     * which is all resolution needs to know.
+     */
+    private fun probeService(flavour: Flavour): Any? {
+        val name = if (flavour == Flavour.LEGACY_PACKAGE_MANAGER) "package" else PERMISSION_SERVICE
+        val binder = SystemServiceHelper.getSystemService(name) ?: return null
+        val stub =
+            if (flavour == Flavour.LEGACY_PACKAGE_MANAGER) PrivilegedBinder.PM_STUB
+            else PERMISSION_STUB
+        return PrivilegedBinder.invokeHidden(Class.forName(stub), null, "asInterface", binder)
     }
 
     private fun interfaceClass(flavour: Flavour): Class<*> = when (flavour) {
@@ -164,6 +233,7 @@ internal object RuntimePermissionAccess {
         else -> Class.forName(PERMISSION_INTERFACE)
     }
 
+    /** The privileged service, through Shizuku. Real calls, never probes. */
     private fun service(flavour: Flavour): Any = when (flavour) {
         Flavour.LEGACY_PACKAGE_MANAGER -> PrivilegedBinder.packageManager()
         else -> {
@@ -176,17 +246,22 @@ internal object RuntimePermissionAccess {
     }
 
     /**
-     * The default virtual-device id, for the device-aware flavour.
+     * The virtual device to act on: this one.
      *
-     * Null when the platform does not expose it, which is reported as a failed
-     * call rather than guessed at: a made-up device id either throws or changes
-     * a permission on a device that is not this one.
+     * Read from the platform rather than written as a literal, because it is a
+     * constant the platform defines and `conventions.md` forbids inlining
+     * those. Null when it cannot be read - which the probe showed the call
+     * still accepts.
      */
-    private fun defaultPersistentDeviceId(): String? = runCatching {
+    private fun deviceId(): String? = runCatching {
         Class.forName("android.companion.virtual.VirtualDeviceManager")
             .getField("PERSISTENT_DEVICE_ID_DEFAULT")
             .get(null) as? String
     }.getOrNull()
+
+    /** Our own package, and a permission it declares. Probes ask about us. */
+    private const val OUR_PACKAGE = "com.bulwark.app"
+    private const val PROBE_PERMISSION = "android.permission.USE_BIOMETRIC"
 
     /**
      * `getPermissionFlags`, interpreted by `PermissionFlags`.
@@ -198,15 +273,9 @@ internal object RuntimePermissionAccess {
      */
     fun flags(packageName: String, permission: String, userId: Int = 0): Int {
         val flavour = flavour() ?: error("This device has no permission API Bulwark recognises")
-        val args: Array<Any?> = when (flavour) {
-            Flavour.DEVICE_AWARE_PERMISSION_MANAGER ->
-                arrayOf(packageName, permission, defaultPersistentDeviceId(), userId)
-            Flavour.PERMISSION_MANAGER -> arrayOf(packageName, permission, userId)
-            // Reversed on purpose. See LEGACY_PACKAGE_MANAGER.
-            Flavour.LEGACY_PACKAGE_MANAGER -> arrayOf(permission, packageName, userId)
-        }
         return PrivilegedBinder.invokeHidden(
-            interfaceClass(flavour), service(flavour), "getPermissionFlags", *args,
+            interfaceClass(flavour), service(flavour), "getPermissionFlags",
+            *flavour.flagsArgs(packageName, permission, userId),
         ) as? Int ?: error("getPermissionFlags returned no flags for $permission on $packageName")
     }
 
@@ -216,75 +285,28 @@ internal object RuntimePermissionAccess {
      * **Undo:** [grant] with the same arguments. Proven possible at uid 2000 on
      * the Agni 2, 2026-09-11 - `dumpsys package com.android.shell` shows
      * `GRANT_RUNTIME_PERMISSIONS: granted=true`, and a grant/revoke round trip
-     * on `com.android.egg` confirmed it.
+     * on `com.android.egg` confirmed it through the shell.
      *
      * Returning without throwing does **not** mean it worked: a `SYSTEM_FIXED`
      * permission accepts this call and ignores it. The caller reads the state
      * back - `policy/PermissionActions` does, and it is the only caller.
      */
-    fun revoke(packageName: String, permission: String, userId: Int = 0) =
-        change("revokeRuntimePermission", packageName, permission, userId)
-
-    /** Gives [permission] back. The undo for [revoke]. */
-    fun grant(packageName: String, permission: String, userId: Int = 0) =
-        change("grantRuntimePermission", packageName, permission, userId)
-
-    /**
-     * The shared body of [grant] and [revoke].
-     *
-     * The argument list is built from the shape the device actually declares,
-     * under one stated rule: **the first two strings are the package and the
-     * permission, the single int is the user, and anything left over is
-     * bookkeeping** - a device id under the device-aware flavour, then a reason
-     * string. Every known signature fits that rule; a shape that does not fit
-     * is refused rather than filled in hopefully.
-     *
-     * Why a rule rather than a list of exact signatures: the two four-argument
-     * variants differ only in what the third string *means*, which no amount of
-     * reflection can tell us. The flavour - established by the read call -
-     * decides that, and the caller's read-back catches it if the inference is
-     * wrong on some build we have not seen.
-     */
-    private fun change(method: String, packageName: String, permission: String, userId: Int) {
+    fun revoke(packageName: String, permission: String, userId: Int = 0) {
         val flavour = flavour() ?: error("This device has no permission API Bulwark recognises")
-        val clazz = interfaceClass(flavour)
-
-        // How many strings past the package and the permission this flavour
-        // needs filled in. The device-aware one must be told which device, or
-        // it changes nothing on this one.
-        val minimumExtras = if (flavour == Flavour.DEVICE_AWARE_PERMISSION_MANAGER) 1 else 0
-
-        val shape = PrivilegedBinder.declaredParameterTypes(clazz, method)
-            .filter { types ->
-                types.size >= 3 &&
-                    types.take(2) == listOf(STRING, STRING) &&
-                    types.all { it == STRING || it == INT } &&
-                    types.count { it == INT } == 1 &&
-                    types.size - 3 >= minimumExtras &&
-                    types.size - 3 <= MAX_EXTRA_STRINGS
-            }
-            // The fewest bookkeeping arguments that still satisfies the
-            // flavour: every extra string is one more thing inferred rather
-            // than read, and inference is what this file is trying to avoid.
-            .minByOrNull { it.size }
-            ?: error("No usable $method on ${clazz.name} - Bulwark will not guess at one")
-
-        // In order: a device id where the flavour needs one, then why we asked.
-        val bookkeeping = ArrayDeque<Any?>().apply {
-            if (minimumExtras > 0) addLast(defaultPersistentDeviceId())
-            addLast(REASON)
-        }
-
-        val args = mutableListOf<Any?>(packageName, permission)
-        shape.drop(2).forEach { type ->
-            args += if (type == INT) userId else bookkeeping.removeFirstOrNull()
-        }
-
-        PrivilegedBinder.invokeHidden(clazz, service(flavour), method, *args.toTypedArray())
+        PrivilegedBinder.invokeHidden(
+            interfaceClass(flavour), service(flavour), "revokeRuntimePermission",
+            *flavour.revokeArgs(packageName, permission, userId),
+        )
     }
 
-    /** A device id and a reason. Anything past that is a shape we do not know. */
-    private const val MAX_EXTRA_STRINGS = 2
+    /** Gives [permission] back. The undo for [revoke]. */
+    fun grant(packageName: String, permission: String, userId: Int = 0) {
+        val flavour = flavour() ?: error("This device has no permission API Bulwark recognises")
+        PrivilegedBinder.invokeHidden(
+            interfaceClass(flavour), service(flavour), "grantRuntimePermission",
+            *flavour.grantArgs(packageName, permission, userId),
+        )
+    }
 
     /** Recorded by the platform as why the permission changed. */
     private const val REASON = "Changed by Bulwark at the user's request"
