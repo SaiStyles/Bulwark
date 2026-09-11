@@ -25,6 +25,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,8 +48,11 @@ import com.bulwark.app.debloat.PackageCatalog
 import com.bulwark.app.debloat.RemovalRating
 import com.bulwark.app.debloat.UadDatabase
 import com.bulwark.app.debloat.readableDescription
+import com.bulwark.app.policy.ActionRecord
 import com.bulwark.app.permissions.AppAccess
 import com.bulwark.app.permissions.AuditSummary
+import com.bulwark.app.permissions.RatFinding
+import com.bulwark.app.permissions.ratFindings
 import com.bulwark.app.permissions.audit
 import com.bulwark.app.permissions.summarise
 import com.bulwark.app.shizuku.PrivilegedPackages
@@ -82,6 +86,7 @@ import kotlinx.coroutines.withContext
 fun PackageListScreen(
     state: ShizukuState,
     runner: ActionRunner,
+    exporter: LogExporter,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -94,8 +99,13 @@ fun PackageListScreen(
     var access by remember { mutableStateOf<List<AppAccess>?>(null) }
     var accessSummary by remember { mutableStateOf<AuditSummary?>(null) }
     var accessUnavailable by remember { mutableStateOf<List<String>>(emptyList()) }
+    var ratSignals by remember { mutableStateOf<List<RatFinding>>(emptyList()) }
     var reload by remember { mutableIntStateOf(0) }
-    val interrupted = remember(reload) { runCatching { runner.interrupted() }.getOrDefault(emptyList()) }
+    // Read off the main thread, below. These were `remember { }` blocks in the
+    // composable body, which put two SQLite reads on the main thread on every
+    // refresh - invisible on a fast phone and exactly the kind of thing that
+    // makes a cheap one stutter.
+    var interrupted by remember { mutableStateOf<List<ActionRecord>>(emptyList()) }
 
     fun report(outcome: ActionRunner.Outcome) {
         notice = when (outcome) {
@@ -109,6 +119,13 @@ fun PackageListScreen(
     }
 
     val ready = state is ShizukuState.Ready
+
+    val shown = entries.orEmpty().filter { e ->
+        (!onlyOffered || e.isOffered) &&
+            (query.isBlank() || e.packageName.contains(query, ignoreCase = true))
+    }
+    val shownCount = shown.size
+    var exportable by remember { mutableStateOf(false) }
 
     // The special-access audit runs whether or not Shizuku is up: accessibility
     // and device admin need no privilege at all, so the two most dangerous
@@ -134,11 +151,29 @@ fun PackageListScreen(
                     isSystem = SpecialAccessReader.isSystem(context, pkg, systemPackages, known),
                 )
             }
-            Triple(apps.audit(), apps.summarise(), result.unavailable)
+            val audited = apps.audit()
+            AuditOutcome(
+                audited,
+                apps.summarise(),
+                result.unavailable,
+                ratFindings(result.signals, audited, shizukuRunning = privileged),
+            )
         }
-        access = built.first
-        accessSummary = built.second
-        accessUnavailable = built.third
+        access = built.apps
+        accessSummary = built.summary
+        accessUnavailable = built.unavailable
+        ratSignals = built.rat
+    }
+
+    // The log is a database. Both of these read it, so both belong here rather
+    // than in the composable body.
+    LaunchedEffect(reload) {
+        val log = withContext(Dispatchers.IO) {
+            runCatching { runner.interrupted() }.getOrDefault(emptyList()) to
+                runCatching { exporter.hasAnything() }.getOrDefault(false)
+        }
+        interrupted = log.first
+        exportable = log.second
     }
 
     LaunchedEffect(ready, reload) {
@@ -169,67 +204,154 @@ fun PackageListScreen(
             modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
         )
 
-        when {
-            !ready -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                // Shown even without Shizuku, deliberately. It is the one thing
-                // Bulwark can say on first launch that is worth caring about.
-                access?.let { a ->
-                    accessSummary?.let { SpecialAccessSection(a, it, accessUnavailable) }
-                }
-                Text(
-                "Start Shizuku to see every package. Without it Bulwark can only " +
-                    "see about half of what is installed - and the half it cannot " +
-                    "see is the preinstalled software.",
-                style = MaterialTheme.typography.bodyMedium,
-                )
-            }
+        // EVERYTHING scrolls, including the audit. It used to sit in a fixed
+        // header above a LazyColumn, so an audit with a dozen findings squeezed
+        // the package list to nothing - and worse, the audit itself could not
+        // be scrolled, so its own later rows were unreachable. A header that
+        // grows with the data is not a header.
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
 
-            error != null -> Card {
-                Text("Could not read packages\n\n$error", Modifier.padding(14.dp))
-            }
-
-            entries == null -> Row(
-                Modifier.fillMaxWidth().padding(24.dp),
-                horizontalArrangement = Arrangement.Center,
-            ) { CircularProgressIndicator() }
-
-            else -> {
-                access?.let { a ->
-                    accessSummary?.let { SpecialAccessSection(a, it, accessUnavailable) }
-                }
-                if (interrupted.isNotEmpty()) InterruptedCard(interrupted.map { it.packageName })
-                notice?.let { NoticeCard(it) { notice = null } }
-                summary?.let { SummaryCard(it) }
-
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    label = { Text("Search") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                )
-
-                FilterChip(
-                    selected = onlyOffered,
-                    onClick = { onlyOffered = !onlyOffered },
-                    label = { Text("Only what I can change") },
-                )
-
-                val shown = entries.orEmpty().filter { e ->
-                    (!onlyOffered || e.isOffered) &&
-                        (query.isBlank() || e.packageName.contains(query, ignoreCase = true))
-                }
-
-                Text(
-                    "${shown.size} shown",
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.padding(vertical = 6.dp),
-                )
-
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(shown, key = { it.packageName }) { entry ->
-                        PackageRow(entry, runner, ::report)
+            // Shown whether or not Shizuku is up. Three of four sources need no
+            // privilege, so this is what Bulwark can say on first launch -
+            // before asking anyone to do anything difficult.
+            access?.let { a ->
+                accessSummary?.let { s ->
+                    item(key = "access") {
+                        CollapsibleAudit(a, s, accessUnavailable, ratSignals)
                     }
+                }
+            }
+
+            if (interrupted.isNotEmpty()) {
+                item(key = "interrupted") {
+                    InterruptedCard(interrupted.map { it.packageName })
+                }
+            }
+
+            notice?.let { message ->
+                item(key = "notice") { NoticeCard(message) { notice = null } }
+            }
+
+            if (!ready) {
+                item(key = "no-shizuku") {
+                    Text(
+                        "Start Shizuku to see every package. Without it Bulwark " +
+                            "can only see about half of what is installed - and " +
+                            "the half it cannot see is the preinstalled software.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(vertical = 8.dp),
+                    )
+                }
+                return@LazyColumn
+            }
+
+            error?.let { message ->
+                item(key = "error") {
+                    Card {
+                        Text(
+                            "Could not read packages. " + message,
+                            Modifier.padding(14.dp),
+                        )
+                    }
+                }
+                return@LazyColumn
+            }
+
+            if (entries == null) {
+                item(key = "loading") {
+                    Row(
+                        Modifier.fillMaxWidth().padding(24.dp),
+                        horizontalArrangement = Arrangement.Center,
+                    ) { CircularProgressIndicator() }
+                }
+                return@LazyColumn
+            }
+
+            if (exportable) {
+                // Rule 5: the record must be exportable in fact, not only in
+                // principle. Offered once there is something to export.
+                item(key = "export") {
+                    TextButton(onClick = {
+                        exporter.export { outcome ->
+                            notice = when (outcome) {
+                                is LogExporter.Outcome.Saved ->
+                                    "Saved to ${outcome.where}. It lists the apps " +
+                                        "you changed — check before sharing it."
+                                is LogExporter.Outcome.Failed ->
+                                    "Could not save. ${outcome.why}"
+                                LogExporter.Outcome.Cancelled -> null
+                            }
+                        }
+                    }) { Text("Export what Bulwark changed") }
+                }
+            }
+
+            summary?.let { s -> item(key = "summary") { SummaryCard(s) } }
+
+            item(key = "filters") {
+                Column {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        label = { Text("Search") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    )
+                    FilterChip(
+                        selected = onlyOffered,
+                        onClick = { onlyOffered = !onlyOffered },
+                        label = { Text("Only what I can change") },
+                    )
+                    Text(
+                        "$shownCount shown",
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.padding(vertical = 6.dp),
+                    )
+                }
+            }
+
+            items(shown, key = { it.packageName }) { entry ->
+                PackageRow(entry, runner, ::report)
+            }
+        }
+    }
+}
+
+/**
+ * The audit, collapsible.
+ *
+ * Expanded by default - being seen is the entire point - but foldable, because
+ * a phone with thirty findings would otherwise bury the package list under
+ * them. Collapsed it still states the count, so folding it away never hides
+ * that there is something there.
+ */
+@Composable
+private fun CollapsibleAudit(
+    apps: List<AppAccess>,
+    summary: AuditSummary,
+    unavailable: List<String>,
+    ratFindings: List<RatFinding>,
+) {
+    var expanded by rememberSaveable { mutableStateOf(true) }
+
+    Column {
+        if (expanded) {
+            SpecialAccessSection(apps, summary, unavailable, ratFindings)
+            TextButton(onClick = { expanded = false }) { Text("Hide") }
+        } else {
+            Card {
+                Column(Modifier.padding(14.dp)) {
+                    Text(
+                        "What apps can do to you",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        "${summary.appsWithAnyAccess} apps hold screen control, " +
+                            "notification access, device admin, overlay, usage " +
+                            "access, all-files access or the ability to install apps.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    TextButton(onClick = { expanded = true }) { Text("Show") }
                 }
             }
         }
@@ -242,23 +364,31 @@ private fun SummaryCard(s: PackageCatalog.Summary) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text("${s.total} packages installed", style = MaterialTheme.typography.titleMedium)
             Text("${s.offered} you can switch off — reversible, data kept")
-            // Says what is KNOWN, not what is offered. Bulwark cannot
-            // uninstall yet, and a count that reads as an offer is a promise
-            // the app does not keep. "Safe" was our word too; the rating
-            // belongs to the community database, so say whose it is.
+            // Says what is KNOWN, not what is offered. Bulwark cannot uninstall
+            // yet, and a count that reads as an offer is a promise the app does
+            // not keep. "Safe" was our word too; the rating belongs to the
+            // community database, so say whose it is.
             Text("${s.uninstallable} the database also rates removable — Bulwark cannot uninstall yet")
             Text("${s.refused} Bulwark refuses — they break your way back")
             Text("${s.unknown} nobody has documented — still offered, and shown as unknown")
             Text(
                 "Package data snapshot ${UadDatabase.SNAPSHOT}, from the Universal " +
-                    "Debloater Alliance. Bundled, not downloaded — Bulwark makes no " +
-                    "network calls.",
+                    "Debloater Alliance. Bundled, not downloaded — Bulwark makes " +
+                    "no network calls.",
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(top = 6.dp),
             )
         }
     }
 }
+
+/** One pass of the audit, so the screen sets its state from a single value. */
+private data class AuditOutcome(
+    val apps: List<AppAccess>,
+    val summary: AuditSummary,
+    val unavailable: List<String>,
+    val rat: List<RatFinding>,
+)
 
 @Composable
 private fun InterruptedCard(packages: List<String>) {

@@ -8,6 +8,7 @@ import android.util.Log
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
 import com.bulwark.app.permissions.Access
+import com.bulwark.app.permissions.DeviceSignal
 
 /**
  * Reads who holds which special access. **Entirely read-only.**
@@ -82,7 +83,31 @@ object SpecialAccessReader {
         val holders: Map<String, Set<Access>>,
         /** Sources that could not be read, in plain language. */
         val unavailable: List<String>,
+        /** Device-level facts that matter in combination. See `RatSignals`. */
+        val signals: Set<DeviceSignal> = emptySet(),
     )
+
+    /**
+     * Device-level facts, read from `Settings.Global`.
+     *
+     * No privilege needed - these keys are world-readable, which is the same
+     * reason a rogue app can *check* them before deciding to exploit them.
+     *
+     * Absent or unreadable is treated as off. That is the safe direction here:
+     * a missing key must not manufacture an alarm, and the cost of missing a
+     * real one is covered by the other half of the signal (an app that can
+     * control the screen) still being reported on its own.
+     */
+    private fun deviceSignals(context: Context): Set<DeviceSignal> {
+        fun on(key: String) = runCatching {
+            Settings.Global.getInt(context.contentResolver, key, 0) != 0
+        }.getOrDefault(false)
+
+        return buildSet {
+            if (on("adb_wifi_enabled")) add(DeviceSignal.WIRELESS_DEBUGGING_ON)
+            if (on("development_settings_enabled")) add(DeviceSignal.DEVELOPER_OPTIONS_ON)
+        }
+    }
 
     /**
      * Reads every source available right now.
@@ -138,7 +163,11 @@ object SpecialAccessReader {
                 "read all files, or install apps - start Shizuku to include these"
         }
 
-        return Result(holders.mapValues { it.value.toSet() }, unavailable)
+        return Result(
+            holders.mapValues { it.value.toSet() },
+            unavailable,
+            deviceSignals(context),
+        )
     }
 
     /**

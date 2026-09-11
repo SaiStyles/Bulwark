@@ -126,11 +126,30 @@ class UadDatabase private constructor(private val entries: Map<String, UadEntry>
         /** Snapshot date of the bundled data. Show it; do not hide staleness. */
         const val SNAPSHOT = "2026-09-10"
 
+        @Volatile
+        private var cached: UadDatabase? = null
+
         /**
-         * Reads and parses the asset. ~1 MB of JSON, so call it off the main
-         * thread and hold the result.
+         * The parsed database, read from the asset once per process.
+         *
+         * ~1 MB of JSON. The previous KDoc told callers to "hold the result"
+         * and the one call site did not - it re-parsed on every refresh, so
+         * every switch-off re-read a megabyte to answer a question whose answer
+         * had not changed. Telling a caller to cache is a wish; caching here is
+         * a property (`conventions.md` lesson 1).
+         *
+         * Safe to hold forever: the parsed data is immutable, bundled in the
+         * APK, and cannot change without a new install. **No `Context` is
+         * retained** - only the parsed map - so this cannot leak an Activity.
+         *
+         * Still blocking on first call. Keep it off the main thread.
          */
-        fun load(context: Context): UadDatabase {
+        fun load(context: Context): UadDatabase =
+            cached ?: synchronized(this) {
+                cached ?: parse(context).also { cached = it }
+            }
+
+        private fun parse(context: Context): UadDatabase {
             val json = context.assets.open(ASSET).use { it.readBytes().decodeToString() }
             val root = JSONObject(json)
             val parsed = HashMap<String, UadEntry>(root.length())

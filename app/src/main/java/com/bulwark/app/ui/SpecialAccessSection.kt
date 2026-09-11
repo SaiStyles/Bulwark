@@ -29,6 +29,7 @@ import com.bulwark.app.ui.theme.WorthLookingAt
 import com.bulwark.app.permissions.AppAccess
 import com.bulwark.app.permissions.Attention
 import com.bulwark.app.permissions.AuditSummary
+import com.bulwark.app.permissions.RatFinding
 import com.bulwark.app.permissions.attention
 import com.bulwark.app.permissions.combinations
 
@@ -51,6 +52,7 @@ fun SpecialAccessSection(
     apps: List<AppAccess>,
     summary: AuditSummary,
     unavailable: List<String>,
+    ratFindings: List<RatFinding> = emptyList(),
 ) {
     Card {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -96,7 +98,45 @@ fun SpecialAccessSection(
                 )
             }
 
+            // Above the per-app list: these are readings of the whole device,
+            // not of one app, and they lose their meaning split across rows.
+            ratFindings.forEach { RatFindingCard(it) }
+
             apps.forEach { AccessRow(it) }
+        }
+    }
+}
+
+/**
+ * A device-level finding, with the ordinary explanation first.
+ *
+ * The order of these three blocks is the design. Bulwark's own onboarding
+ * switches on wireless debugging, so leading with the alarming reading would
+ * have the app frightening a user about its own footprint - and a user who
+ * learns to dismiss this card will dismiss the one that mattered.
+ */
+@Composable
+private fun RatFindingCard(finding: RatFinding) {
+    Card(colors = CardDefaults.cardColors(containerColor = CautionBackground)) {
+        Column(
+            Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                finding.headline,
+                style = MaterialTheme.typography.titleSmall,
+                color = CautionText,
+            )
+            Text(
+                finding.innocentFirst,
+                style = MaterialTheme.typography.bodySmall,
+                color = CautionText,
+            )
+            Text(
+                finding.whatWouldWorry,
+                style = MaterialTheme.typography.bodySmall,
+                color = CautionText,
+            )
         }
     }
 }

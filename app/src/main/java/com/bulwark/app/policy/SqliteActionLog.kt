@@ -5,6 +5,8 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import android.content.pm.ApplicationInfo
+import android.os.Looper
 
 /**
  * [ActionLog] on the platform's own SQLite. One table, insert and select.
@@ -49,6 +51,31 @@ class SqliteActionLog(
     private val now: () -> Long = System::currentTimeMillis,
 ) : ActionLog {
 
+    /**
+     * Debug builds refuse to touch the database from the main thread.
+     *
+     * Two reads landed in a composable body on 2026-09-11 - invisible on a fast
+     * phone, and exactly what makes a cheap one stutter. StrictMode would not
+     * have caught it: it watches the network here, and turning on disk
+     * detection would bury real findings under the framework's own main-thread
+     * reads, which is the noise-trains-people-to-ignore-it failure this project
+     * already knows.
+     *
+     * So the check is narrow instead of broad: this database, this thread,
+     * loud. Debug only - `penaltyDeath` on a stranger's phone turns our
+     * performance bug into their crash.
+     */
+    private val strict =
+        (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+
+    private fun requireBackgroundThread(what: String) {
+        if (!strict) return
+        check(Looper.myLooper() != Looper.getMainLooper()) {
+            "Action log $what on the main thread. It is a database; read it from " +
+                "Dispatchers.IO."
+        }
+    }
+
     private val helper = object : SQLiteOpenHelper(
         context.applicationContext, DATABASE_NAME, null, VERSION,
     ) {
@@ -72,6 +99,7 @@ class SqliteActionLog(
     }
 
     override fun append(entry: NewEntry): Long {
+        requireBackgroundThread("write")
         val values = ContentValues().apply {
             put(COL_AT, now())
             put(COL_PACKAGE, entry.packageName)
@@ -95,14 +123,16 @@ class SqliteActionLog(
     override fun forPackage(packageName: String): List<ActionRecord> =
         query("$COL_PACKAGE = ?", arrayOf(packageName))
 
-    private fun query(selection: String?, args: Array<String>?): List<ActionRecord> =
-        helper.readableDatabase.query(
+    private fun query(selection: String?, args: Array<String>?): List<ActionRecord> {
+        requireBackgroundThread("read")
+        return helper.readableDatabase.query(
             TABLE, null, selection, args, null, null, "$COL_ID ASC",
         ).use { cursor ->
             buildList(cursor.count) {
                 while (cursor.moveToNext()) add(cursor.toRecord())
             }
         }
+    }
 
     private fun Cursor.toRecord() = ActionRecord(
         id = getLong(getColumnIndexOrThrow(COL_ID)),

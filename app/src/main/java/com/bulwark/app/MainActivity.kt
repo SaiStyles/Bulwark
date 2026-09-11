@@ -17,6 +17,7 @@ import com.bulwark.app.security.StrictModePolicy
 import com.bulwark.app.security.WindowHardening
 import com.bulwark.app.shizuku.ShizukuGateway
 import com.bulwark.app.ui.ActionRunner
+import com.bulwark.app.ui.LogExporter
 import com.bulwark.app.ui.PackageListScreen
 import com.bulwark.app.ui.theme.BulwarkTheme
 
@@ -24,6 +25,7 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var gateway: ShizukuGateway
     private lateinit var runner: ActionRunner
+    private lateinit var exporter: LogExporter
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,6 +48,10 @@ class MainActivity : ComponentActivity() {
             actions = PackageActions(journal, packageName),
             journal = journal,
         )
+        // From PackageManager rather than BuildConfig: no extra build feature,
+        // and it reports the version actually installed, which is what a bug
+        // report needs.
+        exporter = LogExporter(this, journal, installedVersion())
 
         setContent {
             BulwarkTheme {
@@ -54,11 +60,20 @@ class MainActivity : ComponentActivity() {
                     PackageListScreen(
                         state = state,
                         runner = runner,
+                        exporter = exporter,
                         modifier = Modifier.padding(innerPadding),
                     )
                 }
             }
         }
+    }
+
+    /** The running build's version name, or a marker if it cannot be read. */
+    private fun installedVersion(): String = try {
+        @Suppress("DEPRECATION")
+        packageManager.getPackageInfo(packageName, 0).versionName ?: "unknown"
+    } catch (_: Throwable) {
+        "unknown"
     }
 
     override fun onStart() {
