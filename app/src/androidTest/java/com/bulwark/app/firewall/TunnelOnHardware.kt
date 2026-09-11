@@ -61,6 +61,13 @@ class TunnelOnHardware {
         // looks. Writing one here also exercises the path the screen uses.
         val rules = FirewallActions(ActionJournal(SqliteActionLog(context))) { false }
 
+        // Whether the phone's owner already had this blocked, decided BEFORE
+        // anything is written. block() does nothing when a rule exists, so a
+        // cleanup that always calls allow() would remove a rule it never
+        // created - this test quietly undoing a decision someone made, which
+        // is the thing the policy layer forbids everywhere else.
+        val wasAlreadyBlocked = TARGET in rules.blocked()
+
         try {
             rules.block(TARGET)
             Firewall.sync(context)
@@ -69,9 +76,9 @@ class TunnelOnHardware {
                 waitFor(expected = true),
             )
         } finally {
-            // Always put the phone back, even if the assertion above failed:
-            // the rule goes first, so a later sync cannot revive the block.
-            rules.allow(TARGET)
+            // Put the phone back the way it was found - which is not the same
+            // as "unblocked". Only remove the rule if this test added it.
+            if (!wasAlreadyBlocked) rules.allow(TARGET)
             Firewall.stop(context)
         }
 
@@ -79,10 +86,12 @@ class TunnelOnHardware {
         // even though the state being waited for is "down". Written as
         // assertFalse first time and the test failed against working code -
         // the messenger again.
-        assertTrue(
-            "an empty rule set must release the VPN slot rather than hold it",
-            waitFor(expected = false),
-        )
+        if (!wasAlreadyBlocked) {
+            assertTrue(
+                "an empty rule set must release the VPN slot rather than hold it",
+                waitFor(expected = false),
+            )
+        }
     }
 
     /**
