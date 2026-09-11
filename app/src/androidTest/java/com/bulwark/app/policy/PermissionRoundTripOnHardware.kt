@@ -118,6 +118,68 @@ class PermissionRoundTripOnHardware {
         )
     }
 
+    /**
+     * Several changes in a row, and the batch entry point, on a real phone.
+     *
+     * The single revoke is proven; this covers what the single one does not -
+     * repeated privileged calls in one session, and [PermissionActions.revokeAcrossApps]
+     * against a real binder rather than a fake.
+     *
+     * **It restores by granting each one back explicitly, never by calling
+     * `restoreEverything`.** That method puts back everything Bulwark has ever
+     * changed on the device, including changes the phone's owner made by hand
+     * for their own reasons. A test that reaches for it would quietly undo
+     * someone's deliberate decisions to tidy up after itself, which is the
+     * behaviour this project forbids everywhere else.
+     */
+    @Test
+    fun severalChangesAndTheBatchPathOnTheApprovedTarget() {
+        requireDeliberateRun()
+        val actions = PermissionActions(ActionJournal(SqliteActionLog(context)))
+
+        val held = BATCH.filter { RuntimePermissionAccess.isGranted(TARGET, it) }
+        assumeTrue(
+            "SKIPPED: $TARGET holds none of $BATCH, so there is nothing to take",
+            held.isNotEmpty(),
+        )
+
+        try {
+            // One at a time first: several privileged calls in one session.
+            held.forEach { permission ->
+                actions.revoke(TARGET, permission)
+                assertFalse(
+                    "$permission should be gone",
+                    RuntimePermissionAccess.isGranted(TARGET, permission),
+                )
+            }
+        } finally {
+            held.forEach { actions.grant(TARGET, it) }
+        }
+
+        held.forEach {
+            assertTrue("$it must be back", RuntimePermissionAccess.isGranted(TARGET, it))
+        }
+
+        // The batch entry point, against a real binder. One app, because one
+        // app is what is approved - the loop and the per-item report are what
+        // is being exercised here, and those do not care how long the list is.
+        val single = held.first()
+        try {
+            val steps = actions.revokeAcrossApps(single, listOf(TARGET))
+            assertEquals(1, steps.size)
+            assertTrue("the batch step must report success", steps.single().succeeded)
+            assertEquals(TARGET, steps.single().packageName)
+            assertFalse(RuntimePermissionAccess.isGranted(TARGET, single))
+        } finally {
+            actions.grant(TARGET, single)
+        }
+
+        assertTrue(
+            "the phone must be left as it was found",
+            RuntimePermissionAccess.isGranted(TARGET, single),
+        )
+    }
+
     private companion object {
         /** Approved by SAI, 2026-09-11. Not a parameter, on purpose. */
         const val TARGET = "com.jio.myjio"
@@ -127,5 +189,25 @@ class PermissionRoundTripOnHardware {
          * being restored rather than a vendor default being overwritten.
          */
         const val PERMISSION = "android.permission.ACCESS_FINE_LOCATION"
+
+        /**
+         * Permissions the approved target is known to hold. Anything it does
+         * not hold is skipped rather than granted first: handing an app a
+         * capability it did not have, to test taking it away, changes the
+         * phone in the wrong direction.
+         *
+         * **No location permission here, deliberately.** This list began with
+         * `ACCESS_COARSE_LOCATION` and the test failed against the device:
+         * precise location includes approximate, so revoking coarse on an app
+         * that also holds fine changes nothing and the read-back says so. That
+         * was a real defect in what the screen offered, now handled by
+         * `markImplied` - but it makes coarse a bad choice for testing the
+         * mechanism, because the correct outcome there is refusal.
+         */
+        val BATCH = listOf(
+            "android.permission.READ_CONTACTS",
+            "android.permission.READ_CALL_LOG",
+            "android.permission.WRITE_CONTACTS",
+        )
     }
 }

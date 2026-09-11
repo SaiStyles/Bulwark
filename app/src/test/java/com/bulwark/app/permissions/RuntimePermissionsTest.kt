@@ -23,7 +23,8 @@ class RuntimePermissionsTest {
         flags: Int = 0,
         packageName: String = "com.example.app",
         protectedApp: Boolean = false,
-    ) = PermissionHolding(packageName, permission, granted, runtime, flags, protectedApp)
+        impliedBy: String? = null,
+    ) = PermissionHolding(packageName, permission, granted, runtime, flags, protectedApp, impliedBy)
 
     @Test
     fun `a granted runtime permission with no flags is ours to offer`() {
@@ -405,5 +406,59 @@ class RuntimePermissionsTest {
                 !REVOKE_IS_NOT_A_LOCK.contains(word, ignoreCase = true),
             )
         }
+    }
+
+    @Test
+    fun `coarse location is not offered when the app already has precise`() {
+        // Found on hardware 2026-09-11. The revoke was accepted, the raw
+        // permission went to revoked, and the read-back still reported the app
+        // as holding it - correctly, because precise location includes
+        // approximate. Nothing about what the app could do had changed.
+        //
+        // The defect was never the read-back. It was offering a control that
+        // could not achieve anything.
+        val holdings = markImplied(
+            listOf(
+                holding(packageName = "com.x", permission = "android.permission.ACCESS_FINE_LOCATION"),
+                holding(packageName = "com.x", permission = "android.permission.ACCESS_COARSE_LOCATION"),
+            )
+        )
+
+        val coarse = holdings.single { it.permission.endsWith("COARSE_LOCATION") }
+        assertEquals(Revocable.IMPLIED_BY_ANOTHER, coarse.revocable())
+        assertTrue("it must not be offered", !coarse.revocable().isOffered)
+        assertTrue(
+            "and it must point at the one that would work",
+            coarse.revocable().plainReason!!.contains("precise location"),
+        )
+        // The permission doing the implying is still perfectly offerable.
+        assertEquals(
+            Revocable.YES,
+            holdings.single { it.permission.endsWith("FINE_LOCATION") }.revocable(),
+        )
+    }
+
+    @Test
+    fun `coarse location is offered normally when the app has no precise`() {
+        val holdings = markImplied(
+            listOf(holding(packageName = "com.x", permission = "android.permission.ACCESS_COARSE_LOCATION"))
+        )
+        assertEquals(Revocable.YES, holdings.single().revocable())
+    }
+
+    @Test
+    fun `implication does not leak between apps`() {
+        // One app holding precise location must not silence another app's
+        // approximate row.
+        val holdings = markImplied(
+            listOf(
+                holding(packageName = "com.a", permission = "android.permission.ACCESS_FINE_LOCATION"),
+                holding(packageName = "com.b", permission = "android.permission.ACCESS_COARSE_LOCATION"),
+            )
+        )
+        assertEquals(
+            Revocable.YES,
+            holdings.single { it.packageName == "com.b" }.revocable(),
+        )
     }
 }

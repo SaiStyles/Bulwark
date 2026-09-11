@@ -59,6 +59,15 @@ data class PermissionHolding(
      * first failure, so one such tick halts everything after it.
      */
     val isProtected: Boolean = false,
+    /**
+     * Another permission this app holds that already covers this one.
+     *
+     * Null unless [markImplied] found one. Android's location permissions are
+     * a hierarchy: an app holding `ACCESS_FINE_LOCATION` reads as holding
+     * `ACCESS_COARSE_LOCATION` too, whatever the coarse entry says on its own,
+     * because precise location includes approximate.
+     */
+    val impliedBy: String? = null,
 )
 
 /**
@@ -145,6 +154,16 @@ enum class Revocable {
      * platform's, so it is the one that has to explain itself best.
      */
     PROTECTED,
+
+    /**
+     * Another permission the app holds already covers this one, so taking it
+     * away would change nothing about what the app can do.
+     *
+     * Not a refusal by anybody - the call would be accepted. It is simply a
+     * control with no effect, and offering one is how an app ends up telling
+     * someone they are protected when they are not.
+     */
+    IMPLIED_BY_ANOTHER,
     ;
 
     /** True only for the one value that means "we can act". */
@@ -177,6 +196,10 @@ enum class Revocable {
                 "Bulwark never changes this app. It is part of calling, or part " +
                     "of how you would undo a change, and breaking it could leave " +
                     "you with no way back."
+            IMPLIED_BY_ANOTHER ->
+                "This app has precise location, which already includes " +
+                    "approximate location. Taking this one away on its own would " +
+                    "change nothing - take precise location away instead."
         }
 }
 
@@ -189,6 +212,10 @@ enum class Revocable {
  */
 fun PermissionHolding.revocable(): Revocable = when {
     !isGranted -> Revocable.NOT_GRANTED
+    // Before every other verdict except "not held": an offer that cannot
+    // change anything is worse than a refusal, because it looks like it
+    // worked. Found on hardware 2026-09-11 - see [markImplied].
+    impliedBy != null -> Revocable.IMPLIED_BY_ANOTHER
     // Before the platform's own refusals: "we will not touch this app" is the
     // more useful thing to tell someone, and it is true regardless of flags.
     isProtected -> Revocable.PROTECTED
@@ -384,7 +411,7 @@ data class PermissionAcrossApps(
  * Pure, so the grouping the screen depends on is tested without a device.
  */
 fun groupByPermission(holdings: List<PermissionHolding>): List<PermissionAcrossApps> =
-    holdings.filter { it.isGranted && it.isRuntime == true }
+    markImplied(holdings).filter { it.isGranted && it.isRuntime == true }
         .groupBy { it.permission }
         .map { (permission, held) ->
             PermissionAcrossApps(permission, held.sortedBy { it.packageName })
@@ -512,3 +539,54 @@ const val REVOKE_IS_NOT_A_LOCK: String =
     "Taking a permission away does not stop an app asking for it again. If you " +
         "say yes to that prompt later, it comes back - and Bulwark will not " +
         "undo a choice you made."
+
+
+/**
+ * Permissions that another permission already covers.
+ *
+ * A deliberately tiny, fixed vocabulary - Android's location pair - written
+ * out rather than derived, because it is a judgement about one platform
+ * behaviour and there is nothing to discover it from at runtime.
+ *
+ * `ACCESS_FINE_LOCATION` includes approximate location. An app holding it
+ * reads as holding `ACCESS_COARSE_LOCATION` too, no matter what the coarse
+ * entry says by itself.
+ */
+private val IMPLIED_BY: Map<String, String> = mapOf(
+    "android.permission.ACCESS_COARSE_LOCATION" to "android.permission.ACCESS_FINE_LOCATION",
+)
+
+/**
+ * Marks holdings that another held permission already covers.
+ *
+ * ## Why this exists
+ *
+ * Found the hard way on the Agni 2, 2026-09-11. A revoke of coarse location
+ * was offered on an app that also held fine location. The call was accepted,
+ * the raw permission went to revoked, and **the read-back still reported the
+ * app as holding it** - correctly, because fine location includes approximate,
+ * so nothing about what the app could do had changed.
+ *
+ * Bulwark reported that as "the system did not apply this. Some permissions
+ * are fixed by the phone's maker" - which is the wrong explanation for the
+ * right verdict, and it was chasing a caching bug that did not exist.
+ *
+ * The defect was never the read-back. It was **offering a control that could
+ * not achieve anything**, which is the same shape as offering a tick for a
+ * package on the never-remove list: it looks like protection and delivers
+ * none.
+ *
+ * Pure and cross-app-aware, so the screen can say the useful thing instead -
+ * take precise location away, and approximate goes with it.
+ */
+fun markImplied(holdings: List<PermissionHolding>): List<PermissionHolding> {
+    val heldPerApp = holdings.filter { it.isGranted }
+        .groupBy({ it.packageName }, { it.permission })
+        .mapValues { it.value.toSet() }
+
+    return holdings.map { holding ->
+        val implier = IMPLIED_BY[holding.permission] ?: return@map holding
+        val alsoHeld = heldPerApp[holding.packageName].orEmpty()
+        if (implier in alsoHeld) holding.copy(impliedBy = implier) else holding
+    }
+}
