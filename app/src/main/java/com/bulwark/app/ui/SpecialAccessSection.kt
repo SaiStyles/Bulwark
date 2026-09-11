@@ -30,6 +30,9 @@ import com.bulwark.app.permissions.AppAccess
 import com.bulwark.app.permissions.Attention
 import com.bulwark.app.permissions.AuditSummary
 import com.bulwark.app.permissions.RatFinding
+import com.bulwark.app.permissions.headline
+import com.bulwark.app.permissions.originLabel
+import com.bulwark.app.permissions.unavailableLine
 import com.bulwark.app.permissions.attention
 import com.bulwark.app.permissions.combinations
 
@@ -68,19 +71,9 @@ fun SpecialAccessSection(
                 return@Column
             }
 
-            // Only states the user-installed count when it is actually known.
-            // Saying "2 you installed yourself" about the launcher, because
-            // unknown defaulted to false, was the first hardware bug here.
-            Text(
-                buildString {
-                    append("${summary.appsWithAnyAccess} apps hold at least one of these")
-                    if (summary.userInstalledWithAccess > 0) {
-                        append(" — ${summary.userInstalledWithAccess} you installed yourself")
-                    }
-                    append(".")
-                },
-                style = MaterialTheme.typography.bodySmall,
-            )
+            // The sentence is chosen in permissions/, where it is unit-tested.
+            // This renders it.
+            Text(summary.headline(), style = MaterialTheme.typography.bodySmall)
             if (summary.appsToLookAt > 0) {
                 Text(
                     "${summary.appsToLookAt} hold a combination worth looking at.",
@@ -90,12 +83,8 @@ fun SpecialAccessSection(
 
             // Degrading honestly: a partial audit presented as complete is the
             // false sense of protection safety-rules.md calls worse than none.
-            if (unavailable.isNotEmpty()) {
-                Text(
-                    "Bulwark could not check: " + unavailable.joinToString("; ") + ".",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Incomplete,
-                )
+            unavailableLine(unavailable)?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = Incomplete)
             }
 
             // Above the per-app list: these are readings of the whole device,
@@ -167,15 +156,7 @@ private fun AccessRow(app: AppAccess) {
             )
         }
 
-        when (app.isSystem) {
-            true -> Text("Came with the phone.", style = MaterialTheme.typography.labelSmall)
-            false -> Text("You installed this.", style = MaterialTheme.typography.labelSmall)
-            // Said out loud rather than guessed either way.
-            null -> Text(
-                "Bulwark cannot tell whether this came with the phone.",
-                style = MaterialTheme.typography.labelSmall,
-            )
-        }
+        Text(app.originLabel, style = MaterialTheme.typography.labelSmall)
 
         app.accesses.sortedBy { it.name }.forEach {
             Text("• ${it.plainMeaning}", style = MaterialTheme.typography.bodySmall)

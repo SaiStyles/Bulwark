@@ -155,6 +155,68 @@ class SpecialAccessTest {
         )
     }
 
+    // ---------------------------------------------------------------------
+    // The copy itself. Extracted from the composable 2026-09-11 so it can be
+    // tested: every defect found on hardware so far has been in what the app
+    // says, not what it does, and a `when` inside a Compose function is
+    // reachable only by an instrumented test.
+    // ---------------------------------------------------------------------
+
+    @Test
+    fun `unknown origin is said out loud, never guessed`() {
+        // The first hardware bug, now unit-testable. Without Shizuku the system
+        // list came back empty, absent read as false, and the row told the user
+        // they had installed the launcher themselves.
+        assertEquals(
+            "Bulwark cannot tell whether this came with the phone.",
+            app("com.mystery", Access.USAGE_ACCESS, isSystem = null).originLabel,
+        )
+        assertEquals(
+            "Came with the phone.",
+            app("com.sys", Access.USAGE_ACCESS, isSystem = true).originLabel,
+        )
+        assertEquals(
+            "You installed this.",
+            app("com.user", Access.USAGE_ACCESS, isSystem = false).originLabel,
+        )
+    }
+
+    @Test
+    fun `the headline claims a user-installed count only when one is known`() {
+        val allUnknown = listOf(
+            app("com.a", Access.USAGE_ACCESS, isSystem = null),
+            app("com.b", Access.USAGE_ACCESS, isSystem = null),
+        ).summarise()
+        assertEquals("2 apps hold at least one of these.", allUnknown.headline())
+        assertFalse(
+            "must not claim any are user-installed",
+            allUnknown.headline().contains("you installed"),
+        )
+
+        val oneKnown = listOf(
+            app("com.a", Access.USAGE_ACCESS, isSystem = null),
+            app("com.b", Access.USAGE_ACCESS, isSystem = false),
+        ).summarise()
+        assertEquals(
+            "2 apps hold at least one of these — 1 you installed yourself.",
+            oneKnown.headline(),
+        )
+    }
+
+    @Test
+    fun `an empty phone still produces a sentence`() {
+        assertEquals("0 apps hold at least one of these.", emptyList<AppAccess>().summarise().headline())
+    }
+
+    @Test
+    fun `what could not be checked is stated, and silence when all of it could`() {
+        assertEquals(null, unavailableLine(emptyList()))
+        assertEquals(
+            "Bulwark could not check: overlays; app usage.",
+            unavailableLine(listOf("overlays", "app usage")),
+        )
+    }
+
     @Test
     fun `combinations stay short enough to be read`() {
         // A list that flags everything trains people to dismiss it - the same

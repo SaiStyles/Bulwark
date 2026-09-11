@@ -100,6 +100,45 @@ data class AppAccess(
 )
 
 /**
+ * What the screen says about where an app came from.
+ *
+ * A pure function rather than a `when` inside the composable, because this is
+ * the sentence that went wrong first: without Shizuku the system list came back
+ * empty, absent read as false, and the row told the user they had installed the
+ * launcher themselves.
+ *
+ * Copy decisions belong where they can be tested. The composable renders the
+ * string; it does not choose it.
+ */
+val AppAccess.originLabel: String
+    get() = when (isSystem) {
+        true -> "Came with the phone."
+        false -> "You installed this."
+        // Said out loud rather than guessed in either direction.
+        null -> "Bulwark cannot tell whether this came with the phone."
+    }
+
+/**
+ * The audit header line.
+ *
+ * Only claims a user-installed count when one is actually known - `summarise`
+ * counts `isSystem == false`, never unknown, and this refuses to print a zero
+ * as though it were a finding.
+ */
+fun AuditSummary.headline(): String = buildString {
+    append("$appsWithAnyAccess apps hold at least one of these")
+    if (userInstalledWithAccess > 0) {
+        append(" — $userInstalledWithAccess you installed yourself")
+    }
+    append(".")
+}
+
+/** The line shown when a source could not be read. Null when all of them were. */
+fun unavailableLine(unavailable: List<String>): String? =
+    if (unavailable.isEmpty()) null
+    else "Bulwark could not check: " + unavailable.joinToString("; ") + "."
+
+/**
  * A combination that is worse than the sum of its parts.
  *
  * **Bulwark does not accuse.** It cannot know whether an app has a good reason
