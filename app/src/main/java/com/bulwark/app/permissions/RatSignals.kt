@@ -75,7 +75,40 @@ data class RatFinding(
     val headline: String,
     val innocentFirst: String,
     val whatWouldWorry: String,
+    /** Packages this finding is about, if any. Device-only findings name none. */
+    val apps: List<String> = emptyList(),
+    /**
+     * The access pairing this finding has already explained, if any.
+     *
+     * `SpecialAccess` names the same pairings per app. Saying the same danger
+     * twice on one screen is the noise `COMBINATIONS` is explicitly kept short
+     * to avoid, so [combinationsToShow] uses this to drop the repeat.
+     */
+    val explains: Set<Access> = emptySet(),
 )
+
+/**
+ * The per-app combinations still worth printing, given what has already been said.
+ *
+ * Both halves of A2 flag Accessibility + overlay: the device-level RAT finding
+ * explains it as part of an attack chain, and the per-app row explains it as a
+ * capability pairing. Both are true and they are genuinely different points -
+ * but on one screen, one after the other, it reads as the app saying the same
+ * thing twice, and `COMBINATIONS` is kept short precisely because a list that
+ * repeats itself trains people to skip it.
+ *
+ * So the fuller statement wins and the repeat is dropped. **Only the exact
+ * pairing already explained, and only for the app it named** - an app holding
+ * notification access *and* screen control still gets that said, because
+ * nothing above said it.
+ *
+ * The LOOK badge stays either way. It is the pointer to which app, not the
+ * explanation.
+ */
+fun combinationsToShow(app: AppAccess, findings: List<RatFinding>): List<Combination> =
+    app.combinations().filter { combination ->
+        findings.none { app.packageName in it.apps && it.explains == combination.accesses }
+    }
 
 /**
  * The RAT-shaped readings of an otherwise ordinary audit.
@@ -152,6 +185,7 @@ fun ratFindings(
                 "Most likely: you turned wireless debugging on yourself, and the " +
                     "app below is one you chose to give screen access to."
             },
+            apps = screenControllers.map { it.packageName },
             whatWouldWorry = "Bulwark could not finish this check. Whether $names " +
                 "can also draw over other apps needs Shizuku to read, and Shizuku " +
                 "is not running - so the piece that would tell you whether any of " +
@@ -170,6 +204,7 @@ fun ratFindings(
                 "Most likely: you turned wireless debugging on yourself, and " +
                     "$names is an app you chose to give screen access to."
             },
+            apps = screenControllers.map { it.packageName },
             whatWouldWorry = "These two on their own are the ordinary case. The " +
                 "attack this screen looks for needs a third piece - an app that " +
                 "can also draw over other apps, to cover the pairing prompt while " +
@@ -186,6 +221,8 @@ fun ratFindings(
                 "screen reader or automation tool you chose, and overlays are how " +
                 "several of those work. If you also turned on wireless debugging " +
                 "yourself, every part of this has an ordinary explanation.",
+            apps = canAlsoHide.map { it.packageName },
+            explains = setOf(Access.ACCESSIBILITY, Access.DRAW_OVER_APPS),
             whatWouldWorry = "Together these are the full shape of a known attack: " +
                 "an app that can drive the screen switches on wireless debugging " +
                 "itself, covers the pairing prompt with an overlay so you never see " +

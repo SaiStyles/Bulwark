@@ -30,6 +30,7 @@ import com.bulwark.app.permissions.AppAccess
 import com.bulwark.app.permissions.Attention
 import com.bulwark.app.permissions.AuditSummary
 import com.bulwark.app.permissions.RatFinding
+import com.bulwark.app.permissions.combinationsToShow
 import com.bulwark.app.permissions.headline
 import com.bulwark.app.permissions.originLabel
 import com.bulwark.app.permissions.unavailableLine
@@ -91,7 +92,7 @@ fun SpecialAccessSection(
             // not of one app, and they lose their meaning split across rows.
             ratFindings.forEach { RatFindingCard(it) }
 
-            apps.forEach { AccessRow(it) }
+            apps.forEach { AccessRow(it, ratFindings) }
         }
     }
 }
@@ -131,7 +132,7 @@ private fun RatFindingCard(finding: RatFinding) {
 }
 
 @Composable
-private fun AccessRow(app: AppAccess) {
+private fun AccessRow(app: AppAccess, findings: List<RatFinding> = emptyList()) {
     Column(
         Modifier.padding(top = 8.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp),
@@ -162,7 +163,8 @@ private fun AccessRow(app: AppAccess) {
             Text("• ${it.plainMeaning}", style = MaterialTheme.typography.bodySmall)
         }
 
-        app.combinations().forEach {
+        // Minus anything a device-level finding above already explained.
+        combinationsToShow(app, findings).forEach {
             Card(colors = CardDefaults.cardColors(containerColor = CautionBackground)) {
                 Text(
                     it.why,

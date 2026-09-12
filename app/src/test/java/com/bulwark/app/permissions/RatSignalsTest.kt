@@ -255,6 +255,66 @@ class RatSignalsTest {
         )
     }
 
+    // ---- not saying the same thing twice ------------------------------
+
+    @Test
+    fun `the loud finding suppresses the per-app repeat of the same pairing`() {
+        // Both halves of A2 flag Accessibility+overlay. On one screen, one
+        // after the other, it reads as the app repeating itself - and
+        // COMBINATIONS is kept short precisely because a list that repeats
+        // trains people to skip it.
+        val both = app("com.both", Access.ACCESSIBILITY, Access.DRAW_OVER_APPS)
+        val findings = ratFindings(debugging, listOf(both), false, overlayKnown = true)
+
+        assertTrue("precondition: the loud finding fired", findings.single().apps.contains("com.both"))
+        assertTrue(
+            "the pairing already explained above must not be printed again",
+            combinationsToShow(both, findings).none {
+                it.accesses == setOf(Access.ACCESSIBILITY, Access.DRAW_OVER_APPS)
+            },
+        )
+    }
+
+    @Test
+    fun `a pairing nobody explained is still printed`() {
+        // Only the exact pairing already stated, and only for the app named.
+        // An app that also reads notifications still gets that said.
+        val both = app(
+            "com.both",
+            Access.ACCESSIBILITY, Access.DRAW_OVER_APPS, Access.NOTIFICATION_LISTENER,
+        )
+        val findings = ratFindings(debugging, listOf(both), false, overlayKnown = true)
+        val shown = combinationsToShow(both, findings)
+
+        assertTrue(
+            "notification+screen control was never mentioned above",
+            shown.any { it.accesses == setOf(Access.NOTIFICATION_LISTENER, Access.ACCESSIBILITY) },
+        )
+    }
+
+    @Test
+    fun `another app keeps its own combination`() {
+        // Suppression is per app. A second app holding the same pairing was
+        // not named above and must still be explained.
+        val named = app("com.named", Access.ACCESSIBILITY, Access.DRAW_OVER_APPS)
+        val other = app("com.other", Access.ACCESSIBILITY, Access.DRAW_OVER_APPS)
+        val findings = listOf(
+            RatFinding(
+                "h", "i", "w",
+                apps = listOf("com.named"),
+                explains = setOf(Access.ACCESSIBILITY, Access.DRAW_OVER_APPS),
+            ),
+        )
+        assertTrue(combinationsToShow(named, findings).isEmpty())
+        assertTrue(combinationsToShow(other, findings).isNotEmpty())
+    }
+
+    @Test
+    fun `with no findings nothing is suppressed`() {
+        val both = app("com.both", Access.ACCESSIBILITY, Access.DRAW_OVER_APPS)
+        assertEquals(both.combinations().size, combinationsToShow(both, emptyList()).size)
+    }
+
     @Test
     fun `several apps that can hide are all named`() {
         val finding = ratFindings(
