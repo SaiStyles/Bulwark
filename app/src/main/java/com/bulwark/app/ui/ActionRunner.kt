@@ -53,14 +53,7 @@ class ActionRunner(
     private val activity: ComponentActivity,
     private val actions: PackageActions,
     private val journal: ActionJournal,
-    /**
-     * The permission half of the policy layer.
-     *
-     * Held only so that [restoreEverything] can put permissions back too. A
-     * "put everything back" that silently left revoked permissions revoked
-     * would be a promise the app does not keep, which `safety-rules.md` treats
-     * as the same class of defect as an overclaimed security property.
-     */
+    /** The permission half of the policy layer. */
     private val permissions: PermissionActions,
     /**
      * The firewall's rules. Held here because a rule change has to be followed
@@ -208,55 +201,6 @@ class ActionRunner(
     }
 
     /**
-     * Authenticates once, then puts every changed package back.
-     *
-     * One authentication for the whole operation, because it is one intent -
-     * a condition `safety-rules.md` rule 1 names explicitly for the bulk
-     * restore it permits.
-     *
-     * Reports **per item**. A user told everything was put back when two
-     * failed is worse off than one told exactly which two, so the message
-     * always names the failures and never says a bare "done".
-     */
-    fun restoreEverything(onOutcome: (Outcome) -> Unit) = authenticated(
-        title = "Put everything back",
-        reason = "Undo every change Bulwark has made to this phone: apps " +
-            "switched back on, permissions given back, and every internet " +
-            "block lifted.",
-        onOutcome = onOutcome,
-    ) {
-        // Both halves, one authentication, because putting everything back is
-        // one intent to the person who pressed it. Apps first: a permission
-        // grant against an app that is still switched off is the less useful
-        // order to fail in.
-        val steps = actions.restoreEverything() +
-            permissions.restoreEverything() +
-            firewall.restoreEverything()
-        // The rules live in the log, but the tunnel is a running thing that has
-        // to be told. Without this the rules were lifted and the tunnel kept
-        // enforcing the old ones - "put everything back" left the app blocked,
-        // which is Bulwark reporting a change it had not finished making.
-        syncFirewall()
-        val failed = steps.filterNot { it.succeeded }
-        when {
-            steps.isEmpty() -> "Bulwark has not changed anything on this phone."
-            failed.isEmpty() -> "Put back all ${steps.size} change(s)."
-            // A partial restore is a FAILURE report, not a success with a
-            // caveat. Routed through the failure path so it does not
-            // auto-dismiss like good news - the user has to see which packages
-            // are still changed in order to do anything about them.
-            else -> throw PartialFailure(
-                buildString {
-                    append("Put back ${steps.size - failed.size} of ${steps.size}. ")
-                    append("These are still changed and need a look: ")
-                    append(failed.joinToString(", ") { it.describe })
-                    append(".")
-                }
-            )
-        }
-    }
-
-    /**
      * Authenticates, then takes one permission away from one app.
      *
      * The per-app view's action. Separate from [revokeAcrossApps] so the
@@ -280,9 +224,10 @@ class ActionRunner(
     /**
      * Gives one permission back, undoing a single revoke.
      *
-     * The counterpart to [revokePermission], and until 2026-09-12 the only way
-     * to reverse one was `restoreEverything`, which reverses everything. An
-     * undo you cannot aim is not much of an undo.
+     * The counterpart to [revokePermission]. There was once only a bulk
+     * "put everything back", which reversed the lot; this is the aimed
+     * version, and the bulk one was removed on 2026-09-12 once every row had
+     * its own undo. An undo you cannot aim is not much of an undo.
      *
      * Authenticated like the revoke it reverses. Granting is not destructive,
      * but it *widens* what an app can do, and the person authorising should be
@@ -336,7 +281,7 @@ class ActionRunner(
      *   which three and that seven were untouched, never a bare count.
      *
      * One authentication for the whole batch, because it is one intent - the
-     * same reasoning the bulk restore already stands on.
+     * same reasoning the single-row undo stands on.
      */
     fun revokeAcrossApps(
         permission: String,

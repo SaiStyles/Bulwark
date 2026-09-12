@@ -38,7 +38,7 @@ import com.bulwark.app.shizuku.RuntimePermissionAccess
  * direction an attacker would want, and the grant is an undo, which should be
  * one deliberate act at a time.
  *
- * Bulk **restore** is [restoreEverything], under the conditions rule 1 sets
+ * Bulk restore was removed 2026-09-12, along with the rule that allowed it.
  * for the package one: same guards per step, logged individually, reported per
  * item.
  *
@@ -167,7 +167,7 @@ class PermissionActions(
      *
      * ## Stops at the first failure, unlike the restore
      *
-     * [restoreEverything] continues past failures because stopping halfway
+     * A batch continues past failures because stopping halfway
      * leaves *more* of the phone changed. This is the opposite case: it takes
      * capability away, so rule 6's fail-closed applies as written. If the
      * privileged path has died, grinding through nine more apps is how a bad
@@ -242,68 +242,13 @@ class PermissionActions(
         )
     }
 
-    /**
-     * Puts every permission Bulwark changed back to the state it found.
-     *
-     * The permission half of the one bulk operation that exists - see
-     * `safety-rules.md` rule 1, amended 2026-09-11 for restore only. Every
-     * condition it sets applies here: each step passes the same guards, each is
-     * logged individually, and the caller is handed **one result per
-     * permission** rather than a bare "done".
-     *
-     * ## Restores to what was found, not one step back
-     *
-     * Each app-and-permission pair is put back to the state it was in before
-     * Bulwark's **first** change to it, not the reverse of its last one. The
-     * difference is the bug hardware testing found in the disable path on
-     * 2026-09-10: undoing the most recent change, when that change was itself
-     * an undo, quietly performs a destructive action inside an operation
-     * labelled as putting things back.
-     *
-     * ## Continues past a failure, on purpose
-     *
-     * Rule 6 says fail closed, and for a destructive action that is right.
-     * Here it is backwards: stopping halfway through a restore leaves *more* of
-     * the phone changed than finishing it.
-     *
-     * @return one [StepOutcome] per permission, newest change first. Empty when
-     *   Bulwark has changed no permissions.
-     */
-    fun restoreEverything(userId: Int = 0): List<StepOutcome> =
-        firstChangePerPermission().map { change ->
-            val permission = change.permission
-                // Cannot happen: the journal refuses to write a permission row
-                // without one. Reported rather than assumed, because a crash
-                // inside a restore is the worst possible place for a surprise.
-                ?: return@map StepOutcome(
-                    change.packageName, null, succeeded = false,
-                    failure = "A permission change was recorded without naming the permission.",
-                )
-            runCatching {
-                // What it was before we touched it: a revoke means it was
-                // allowed, a grant means it was not.
-                if (change.kind == ActionKind.REVOKE_PERMISSION) {
-                    grant(change.packageName, permission, userId)
-                } else {
-                    revoke(change.packageName, permission, userId)
-                }
-            }.fold(
-                onSuccess = { StepOutcome(change.packageName, permission, succeeded = true) },
-                onFailure = {
-                    StepOutcome(
-                        change.packageName, permission, succeeded = false,
-                        failure = "${it::class.java.simpleName}: ${it.message}",
-                    )
-                },
-            )
-        }
 
     /**
      * The earliest *successful* change to each app-and-permission pair, newest
      * pair first.
      *
      * Earliest per pair because that is the one that knows the state Bulwark
-     * found. Newest pair first to match [PackageActions.restoreEverything],
+     * found. Newest pair first, matching the Changes screen's order,
      * where the order exists because undo is a stack.
      */
     private fun firstChangePerPermission(): List<ActionRecord> {

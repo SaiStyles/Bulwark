@@ -36,10 +36,11 @@ import com.bulwark.app.shizuku.PackageState
  * it and the absence of the method is the enforcement: forty changes at once
  * means nobody can tell which one broke the phone.
  *
- * Bulk **restore** is allowed and lives in [restoreEverything] - rule 1 was
- * amended for it on 2026-09-11, in writing rather than by drifting. Undoing
- * accumulated change is the opposite of accumulating it, and a user who has to
- * reverse thirty things by hand is not being kept safe.
+ * **Bulk restore is gone too**, removed 2026-09-12 with the rule that allowed
+ * it. Every change has its own undo on the Changes screen, which is the same
+ * thing aimed rather than sprayed - and the bulk path was a second
+ * implementation of undo that drifted from the first, handing an uninstalled
+ * package an ENABLE and reporting success for work it had not done.
  *
  * ## Proven on hardware
  *
@@ -249,67 +250,6 @@ class PackageActions(
         }?.previousState
     }
 
-    /**
-     * Puts every package Bulwark changed back to the state it found.
-     *
-     * The one bulk operation that exists, and only because it is a *restore*:
-     * see `safety-rules.md` rule 1, amended 2026-09-11 with the reasoning and
-     * the conditions this method has to satisfy.
-     *
-     * ## Continues past a failure, on purpose
-     *
-     * Rule 6 says fail closed, and for a destructive action that is right -
-     * stopping leaves less of the phone changed. Here it is backwards:
-     * stopping halfway through a restore leaves *more* of the phone changed
-     * than finishing. So each package is attempted, each result is recorded,
-     * and **the caller is handed every outcome** rather than a boolean.
-     *
-     * The honesty condition rule 1 imposes is that this never reports a bare
-     * "done". A user told everything was put back when two packages failed is
-     * worse off than one told exactly which two.
-     *
-     * Newest first, from [undoPlan] - undo is a stack, and restoring in
-     * insertion order can put a dependency back before the thing that needed
-     * it.
-     *
-     * **Whole-app changes only.** The permission half lives in
-     * [PermissionActions.restoreEverything]; the two are run together by the
-     * caller under a single authentication, because putting everything back is
-     * one intent even where it is two mechanisms.
-     *
-     * @return one [StepOutcome] per package, in the order attempted. Empty
-     *   when Bulwark has disabled nothing.
-     */
-    fun restoreEverything(userId: Int = 0): List<StepOutcome> {
-        val history = journal.history()
-        // One entry per package: restoring a package twice is pointless, and
-        // the second attempt would undo the first.
-        //
-        // Permission changes are filtered out rather than ignored: they are
-        // restored by `PermissionActions.restoreEverything`, and the caller
-        // runs both under one authentication. Without this filter an app whose
-        // only change was a revoked permission would be handed to
-        // [switchBackOn], which would find nothing to enable and report a
-        // success for work it had not done.
-        val packages = history.undoPlan()
-            .filterNot { it.kind.isPermissionChange }
-            .map { it.packageName }
-            .distinct()
-
-        return packages.map { packageName ->
-            runCatching { switchBackOn(packageName, userId) }.fold(
-                onSuccess = { StepOutcome(packageName, permission = null, succeeded = true) },
-                onFailure = {
-                    StepOutcome(
-                        packageName,
-                        permission = null,
-                        succeeded = false,
-                        failure = "${it::class.java.simpleName}: ${it.message}",
-                    )
-                },
-            )
-        }
-    }
 
     /**
      * Undoes the most recent successful change to [packageName].

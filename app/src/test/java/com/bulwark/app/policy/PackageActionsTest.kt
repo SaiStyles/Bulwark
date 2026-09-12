@@ -329,7 +329,10 @@ class PackageActionsTest {
         // out of the package guard, where `com.claims.app` matched "ims". The
         // fix is the same one: split the name into words and compare them.
         val bulkShaped = setOf("all", "batch", "bulk", "each", "every", "everything")
-        val allowed = setOf("restoreEverything")
+        // Empty since 2026-09-12. Bulk restore was the single exception and
+        // it is gone, so the rule is now absolute: no method here applies an
+        // action to many things.
+        val allowed = emptySet<String>()
 
         fun words(name: String): List<String> =
             name.split(Regex("(?=[A-Z])|_")).map { it.lowercase() }.filter { it.isNotBlank() }
@@ -345,110 +348,4 @@ class PackageActionsTest {
         assertTrue("no bulk apply may exist; found: $offenders", offenders.isEmpty())
     }
 
-    @Test
-    fun `restoreEverything puts back everything that was changed`() {
-        val state = FakeState(
-            mapOf("com.a" to PackageState.ENABLED, "com.b" to PackageState.DEFAULT),
-        )
-        val (act, _) = actions(state)
-        act.disable("com.a")
-        act.disable("com.b")
-
-        val steps = act.restoreEverything()
-
-        assertEquals(2, steps.size)
-        assertTrue("all should have succeeded", steps.all { it.succeeded })
-        assertEquals(PackageState.ENABLED, state.states["com.a"])
-        assertEquals("must restore DEFAULT, not ENABLED", PackageState.DEFAULT, state.states["com.b"])
-    }
-
-    @Test
-    fun `restoreEverything works newest first`() {
-        // Undo is a stack. Restoring in insertion order can put a dependency
-        // back before the thing that needed it.
-        val state = FakeState(
-            mapOf("com.first" to PackageState.ENABLED, "com.second" to PackageState.ENABLED),
-        )
-        val (act, _) = actions(state)
-        act.disable("com.first")
-        act.disable("com.second")
-
-        assertEquals(
-            listOf("com.second", "com.first"),
-            act.restoreEverything().map { it.packageName },
-        )
-    }
-
-    @Test
-    fun `restoreEverything continues past a failure and reports it`() {
-        // Rule 6 says fail closed, and for a destructive action that is right.
-        // Here it is backwards: stopping halfway through a restore leaves MORE
-        // of the phone changed than finishing does.
-        val state = FakeState(
-            mapOf("com.a" to PackageState.ENABLED, "com.b" to PackageState.ENABLED),
-        )
-        val (act, _) = actions(state)
-        act.disable("com.a")
-        act.disable("com.b")
-
-        state.failFor = setOf("com.a")
-        val steps = act.restoreEverything()
-
-        assertEquals("must attempt both", 2, steps.size)
-        val failed = steps.single { !it.succeeded }
-        assertEquals("com.a", failed.packageName)
-        assertTrue("must say why: ${failed.failure}", failed.failure!!.contains("Shizuku died"))
-        assertTrue("the other must still have been restored", steps.single { it.succeeded }.packageName == "com.b")
-        assertEquals(PackageState.ENABLED, state.states["com.b"])
-    }
-
-    @Test
-    fun `restoreEverything touches each package once`() {
-        // Restoring a package twice would undo the first restore.
-        val state = FakeState(mapOf("com.a" to PackageState.ENABLED))
-        val (act, _) = actions(state)
-        act.disable("com.a")
-        act.switchBackOn("com.a")
-        act.disable("com.a")
-
-        val steps = act.restoreEverything()
-
-        assertEquals(1, steps.size)
-        assertEquals(PackageState.ENABLED, state.states["com.a"])
-    }
-
-    @Test
-    fun `restoreEverything on an untouched phone does nothing and says so`() {
-        val state = FakeState()
-        val (act, _) = actions(state)
-        assertTrue(act.restoreEverything().isEmpty())
-        assertTrue("must not have touched anything", state.writes.isEmpty())
-    }
-
-    @Test
-    fun `restoreEverything ignores permission changes, which are another class's job`() {
-        // A package whose only change was a revoked permission must not be
-        // handed to switchBackOn: it would find nothing to enable, report a
-        // success, and tell the user a permission had been put back when
-        // nothing had. PermissionActions restores those; the UI runs both
-        // under one authentication.
-        val log = FakeLog()
-        log.append(
-            NewEntry(
-                "com.example.app", ActionKind.REVOKE_PERMISSION, Phase.ATTEMPTED, 0,
-                permission = "android.permission.CAMERA",
-            )
-        )
-        log.append(
-            NewEntry(
-                "com.example.app", ActionKind.REVOKE_PERMISSION, Phase.SUCCEEDED, 0,
-                attemptId = 1, permission = "android.permission.CAMERA",
-            )
-        )
-        val state = FakeState()
-        val act = PackageActions(ActionJournal(log), "com.bulwark.app", state)
-
-        assertTrue("no package-level restore is owed here", act.restoreEverything().isEmpty())
-        assertTrue("and nothing may be written", state.writes.isEmpty())
-    }
 }

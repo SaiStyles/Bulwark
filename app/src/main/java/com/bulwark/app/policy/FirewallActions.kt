@@ -135,24 +135,4 @@ class FirewallActions(
      * built from this, and a stale set means enforcing yesterday's wishes.
      */
     fun blocked(): Set<String> = journal.history().blockedPackages()
-
-    /**
-     * Puts every network rule back, one at a time.
-     *
-     * The firewall's share of "put everything back", under the same rule 1
-     * conditions as the other two: same guards per step, logged individually,
-     * reported per item, continuing past a failure because stopping halfway
-     * leaves *more* of the phone changed than finishing.
-     */
-    fun restoreEverything(): List<StepOutcome> = blocked().map { packageName ->
-        runCatching { allow(packageName) }.fold(
-            onSuccess = { StepOutcome(packageName, permission = null, succeeded = true) },
-            onFailure = {
-                StepOutcome(
-                    packageName, permission = null, succeeded = false,
-                    failure = "${it::class.java.simpleName}: ${it.message}",
-                )
-            },
-        )
-    }
 }

@@ -215,7 +215,7 @@ class PermissionActionsTest {
         // stay honest - a third entry means someone widened the rule without
         // amending it.
         val bulkShaped = listOf("all", "batch", "bulk", "each", "every", "across")
-        val allowed = setOf("restoreEverything", "revokeAcrossApps")
+        val allowed = setOf("revokeAcrossApps")
 
         val offenders = PermissionActions::class.java.declaredMethods
             // Kotlin emits `name$default` bridges for default arguments.
@@ -326,113 +326,10 @@ class PermissionActionsTest {
     }
 
     @Test
-    fun `restore puts every changed permission back`() {
-        val access = FakeAccess(
-            setOf("com.a" to camera, "com.b" to "android.permission.RECORD_AUDIO"),
-        )
-        val (act, _) = actions(access)
-        act.revoke("com.a", camera)
-        act.revoke("com.b", "android.permission.RECORD_AUDIO")
-
-        val steps = act.restoreEverything()
-
-        assertEquals(2, steps.size)
-        assertTrue(steps.all { it.succeeded })
-        assertTrue(("com.a" to camera) in access.granted)
-        assertTrue(("com.b" to "android.permission.RECORD_AUDIO") in access.granted)
-    }
-
-    @Test
-    fun `restore reports per permission, naming what it could not put back`() {
-        // Rule 1 makes this a condition of bulk restore being allowed at all:
-        // a user told everything was put back when one failed is worse off
-        // than one told exactly which.
-        val access = FakeAccess(setOf("com.a" to camera, "com.b" to camera))
-        val (act, _) = actions(access)
-        act.revoke("com.a", camera)
-        act.revoke("com.b", camera)
-        access.failFor = setOf("com.a" to camera)
-
-        val steps = act.restoreEverything()
-
-        assertEquals(2, steps.size)
-        val failed = steps.single { !it.succeeded }
-        assertEquals("com.a", failed.packageName)
-        assertEquals(camera, failed.permission)
-        assertTrue(failed.failure!!.contains("Shizuku died"))
-        // Continues past the failure: stopping halfway through a restore
-        // leaves more of the phone changed than finishing it.
-        assertTrue(steps.single { it.succeeded }.packageName == "com.b")
-    }
-
-    @Test
     fun `restore names a failed permission step in words`() {
         val step = StepOutcome("com.a", camera, succeeded = false, failure = "nope")
         assertEquals("com.a (Camera)", step.describe)
         assertEquals("com.a", StepOutcome("com.a", null, succeeded = true).describe)
     }
 
-    @Test
-    fun `restore puts back what Bulwark found, not the reverse of its last move`() {
-        // The bug hardware testing found in the disable path on 2026-09-10: an
-        // undo of an undo performs a destructive action inside an operation
-        // labelled as putting things back. Here Bulwark revoked, then granted
-        // back; "put everything back" must leave it granted, which is the
-        // state it found.
-        val access = FakeAccess(setOf("com.a" to camera))
-        val (act, _) = actions(access)
-        act.revoke("com.a", camera)
-        act.grant("com.a", camera)
-
-        val steps = act.restoreEverything()
-
-        assertEquals(1, steps.size)
-        assertTrue("it must still be granted", ("com.a" to camera) in access.granted)
-        assertEquals(
-            "and nothing further may be written to the platform",
-            2, access.writes.size,
-        )
-    }
-
-    @Test
-    fun `restore on a phone with no permission changes does nothing`() {
-        val access = FakeAccess()
-        val (act, _) = actions(access)
-        assertTrue(act.restoreEverything().isEmpty())
-    }
-
-    @Test
-    fun `restore ignores whole-app changes, which are another class's job`() {
-        // Both halves run under one authentication at the UI edge. If this one
-        // also tried to handle DISABLE rows it would report success for work
-        // it never did.
-        val log = FakeLog()
-        log.append(
-            NewEntry("com.a", ActionKind.DISABLE, Phase.ATTEMPTED, 0, previousState = 1)
-        )
-        log.append(
-            NewEntry("com.a", ActionKind.DISABLE, Phase.SUCCEEDED, 0, attemptId = 1)
-        )
-        val access = FakeAccess()
-        val act = PermissionActions(ActionJournal(log), access)
-
-        assertTrue(act.restoreEverything().isEmpty())
-        assertTrue(access.writes.isEmpty())
-    }
-
-    @Test
-    fun `an interrupted revoke is not restored, because it may never have happened`() {
-        // An attempt with no outcome is ambiguous, and rule 6 says report
-        // rather than act on a guess. Restoring it would be Bulwark granting a
-        // permission back that it may never have taken.
-        val log = FakeLog()
-        log.append(
-            NewEntry("com.a", ActionKind.REVOKE_PERMISSION, Phase.ATTEMPTED, 0, permission = camera)
-        )
-        val access = FakeAccess()
-        val act = PermissionActions(ActionJournal(log), access)
-
-        assertTrue(act.restoreEverything().isEmpty())
-        assertFalse(("com.a" to camera) in access.granted)
-    }
 }

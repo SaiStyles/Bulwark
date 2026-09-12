@@ -159,36 +159,19 @@ class FirewallActionsTest {
     }
 
     @Test
-    fun `restore puts every rule back and reports per app`() {
-        val (act, _) = actions()
-        act.block("com.a")
-        act.block("com.b")
-
-        val steps = act.restoreEverything()
-
-        assertEquals(2, steps.size)
-        assertTrue(steps.all { it.succeeded })
-        assertTrue(act.blocked().isEmpty())
-    }
-
-    @Test
-    fun `restore on a phone with no rules does nothing`() {
-        val (act, _) = actions()
-        assertTrue(act.restoreEverything().isEmpty())
-    }
-
-    @Test
-    fun `there is no bulk block, and restore is the only exception`() {
-        // Rule 1 again, and the firewall gets no special dispensation: the
-        // amendment for bulk revoke was written for one permission across
-        // chosen apps, and says nothing about cutting many apps off at once.
+    fun `there is no bulk block, and now no exception at all`() {
+        // Rule 1 again, and the firewall gets no special dispensation. Bulk
+        // restore was the one exception here and it was removed on 2026-09-12
+        // with the rule that allowed it; the bulk-revoke amendment was written
+        // for one permission across chosen apps and says nothing about cutting
+        // many apps off at once.
         val bulkShaped = listOf("all", "batch", "bulk", "each", "every", "across")
         // "allow" contains "all". A substring guard catching a word that
         // merely looks like its target is the exact bug ProtectedPackages
         // records as FRAGMENT_FALSE_FRIENDS, where "simplenote" matched "sim"
         // - reached here by a different door, and caught on the first run
         // because the test was written before the method list was tidy.
-        val allowed = setOf("restoreEverything", "allow")
+        val allowed = setOf("allow")
 
         val offenders = FirewallActions::class.java.declaredMethods
             .filterNot { it.isSynthetic }

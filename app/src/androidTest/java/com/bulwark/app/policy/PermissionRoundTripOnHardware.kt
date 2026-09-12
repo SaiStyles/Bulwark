@@ -125,12 +125,11 @@ class PermissionRoundTripOnHardware {
      * repeated privileged calls in one session, and [PermissionActions.revokeAcrossApps]
      * against a real binder rather than a fake.
      *
-     * **It restores by granting each one back explicitly, never by calling
-     * `restoreEverything`.** That method puts back everything Bulwark has ever
-     * changed on the device, including changes the phone's owner made by hand
-     * for their own reasons. A test that reaches for it would quietly undo
-     * someone's deliberate decisions to tidy up after itself, which is the
-     * behaviour this project forbids everywhere else.
+     * **It restores by granting each one back explicitly.** There is no bulk
+     * restore any more - it was removed on 2026-09-12 along with the rule that
+     * allowed it - but the reason this test never used one still stands: a
+     * sweep that puts back everything Bulwark ever changed would also undo
+     * changes the phone's owner made by hand, to tidy up after a test.
      */
     @Test
     fun severalChangesAndTheBatchPathOnTheApprovedTarget() {

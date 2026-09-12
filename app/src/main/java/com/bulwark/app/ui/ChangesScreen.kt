@@ -141,16 +141,17 @@ fun ChangesScreen(
         if (!list.isNullOrEmpty()) {
             item(key = "bulk") {
                 Column(Modifier.padding(top = 20.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    // Moved here from under a 371-row list, where it asked for
-                    // a decision without showing what the decision covered.
-                    // Now it sits under exactly the list it reverses.
+                    // "Put everything back" was here and is gone, 2026-09-12.
+                    // Every row above has its own undo, which is the precise
+                    // version of the same thing - and the bulk path was a
+                    // second implementation of undo that drifted from the
+                    // first: it handed an uninstalled package an ENABLE and
+                    // wrote SUCCEEDED over work it had not done.
                     Text(
-                        "Undo all of it at once, or keep a copy of the list first.",
+                        "Undo them one at a time above, or keep a copy of the " +
+                            "list first.",
                         style = MaterialTheme.typography.bodySmall,
                     )
-                    TextButton(onClick = { runner.restoreEverything(onOutcome) }) {
-                        Text("Put everything back")
-                    }
                     // Warned BEFORE the picker, not after the file exists.
                     // threat-model.md: for someone who has just switched off
                     // monitoring software, a file naming it - sitting in
@@ -234,14 +235,13 @@ private fun ChangeRow(
                             change.permission.orEmpty(),
                             done,
                         )
-                    // Not built, and the row should never appear. If it does,
-                    // saying so beats a button that quietly does nothing.
-                    ChangeKind.UNINSTALLED -> done(
-                        ActionRunner.Outcome.Failed(
-                            "Bulwark cannot reinstall yet. install-existing is " +
-                                "unproven, so this is not offered.",
-                        ),
-                    )
+                    // Offered from 2026-09-12, once uninstall itself was
+                    // proven on hardware. It reads the state back and fails
+                    // loudly if the package is still missing, so an
+                    // install-existing that does not work reports that rather
+                    // than leaving a green tick over a gap.
+                    ChangeKind.UNINSTALLED ->
+                        runner.putBack(change.packageName, change.packageName, done)
                 }
             },
         ) { Text(change.undoLabel()) }

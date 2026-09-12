@@ -59,19 +59,45 @@ internal object PackageRemoval {
     private const val RESULT_ACTION = "com.bulwark.app.UNINSTALL_RESULT"
 
     /**
-     * The package the call is *attributed* to, which is not us.
+     * What `pm uninstall` passes as the caller, which is **nothing**.
      *
-     * The binder transaction arrives as uid 2000 because Shizuku forwards it,
-     * so the caller name has to match that uid. Passing our own package made
-     * the platform check **Bulwark's** permissions, and Bulwark does not hold
-     * `DELETE_PACKAGES` - so it answered `STATUS_PENDING_USER_ACTION` on the
-     * result channel, threw nothing, and removed nothing. On 2026-09-12 that
-     * looked exactly like a silent no-op, twice, until the channel was read.
+     * The transaction arrives as uid 2000 because Shizuku forwards it, and the
+     * platform skips the caller-package check entirely for a shell or root
+     * uid. `PackageManagerShellCommand` passes null, and `pm uninstall --user 0`
+     * demonstrably works on this device - so null is not a guess, it is the
+     * known-good path copied exactly.
+     *
+     * Our own package name was wrong for a different reason than first
+     * assumed. It was never proven to cause the failure: the first two
+     * attempts failed *silently* because the result channel was discarded, and
+     * the real status only appeared once that was fixed. Recorded here rather
+     * than quietly corrected, because "the fix that fixed nothing is evidence
+     * against the diagnosis" and this diagnosis had no evidence at all.
      */
-    private const val SHELL_PACKAGE = "com.android.shell"
+    private val CALLER_PACKAGE: String? = null
 
     /** How long to wait for the platform to report. Generous; it is one call. */
     private const val RESULT_TIMEOUT_MS = 10_000L
+
+    /**
+     * `PackageManager.DELETE_SYSTEM_APP`, which is `@SystemApi` and so cannot
+     * be referenced by name.
+     *
+     * **Without it a preinstalled package is refused.** The platform said so
+     * on 2026-09-12, in the log rather than in the status: "Attempt to delete
+     * removable system package com.android.egg", immediately after force-
+     * stopping it. `deletePackageX` walks the whole delete and then declines,
+     * because the caller never asked to remove a *system* package.
+     *
+     * It does **not** touch `/system`, which is read-only - the APK stays and
+     * `install-existing` still restores it. Combined with a real `userId` and
+     * without `DELETE_ALL_USERS`, this is exactly what `pm uninstall --user 0`
+     * does, which is the command proven to work on this device.
+     *
+     * Harmless for a package the user installed: there is no system copy for
+     * the flag to be about.
+     */
+    private const val DELETE_SYSTEM_APP = 0x00000004
 
     /**
      * Removes [packageName] for [userId].
@@ -96,10 +122,12 @@ internal object PackageRemoval {
                 installer,
                 "uninstall",
                 versioned,
-                // Not our package. See SHELL_PACKAGE: attributing this to
-                // Bulwark makes the platform check Bulwark's permissions.
-                SHELL_PACKAGE,
-                0, // flags: remove for this user, nothing exotic
+                // Null, exactly as `pm uninstall` passes. See CALLER_PACKAGE.
+                CALLER_PACKAGE,
+                // Not zero. Zero is what made the platform decline a
+                // preinstalled package after doing all the work - see the
+                // constant. Never DELETE_ALL_USERS: this is one user's copy.
+                DELETE_SYSTEM_APP,
                 channel.sender,
                 userId,
             )
@@ -228,7 +256,8 @@ internal object PackageRemoval {
                 "the request was rejected as invalid"
             PackageInstaller.STATUS_FAILURE_STORAGE ->
                 "there was a storage problem"
-            else -> message?.takeIf { it.isNotBlank() } ?: "status $status"
+            else -> message?.takeIf { it.isNotBlank() }?.let { "$it (status $status)" }
+                ?: "status $status"
         }
     }
 
