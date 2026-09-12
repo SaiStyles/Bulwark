@@ -211,7 +211,12 @@ fun PackageListScreen(
                 audited,
                 apps.summarise(),
                 result.unavailable,
-                ratFindings(result.signals, audited, shizukuRunning = privileged),
+                ratFindings(
+                    result.signals,
+                    audited,
+                    shizukuRunning = privileged,
+                    overlayKnown = result.overlayKnown,
+                ),
             )
         }
         access = built.apps

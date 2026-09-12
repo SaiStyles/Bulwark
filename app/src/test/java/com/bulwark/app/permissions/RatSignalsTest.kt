@@ -22,10 +22,15 @@ class RatSignalsTest {
     private fun app(name: String, vararg accesses: Access) =
         AppAccess(name, accesses.toSet(), isSystem = false)
 
+    private val debugging = setOf(DeviceSignal.WIRELESS_DEBUGGING_ON)
+
     @Test
     fun `a clean phone produces nothing`() {
         assertTrue(
-            ratFindings(emptySet(), listOf(app("com.quiet")), shizukuRunning = false).isEmpty(),
+            ratFindings(
+                emptySet(), listOf(app("com.quiet")),
+                shizukuRunning = false, overlayKnown = true,
+            ).isEmpty(),
         )
     }
 
@@ -36,21 +41,53 @@ class RatSignalsTest {
         // scare label on the app a disabled user depends on.
         val findings = ratFindings(
             emptySet(),
-            listOf(app("com.some.reader", Access.ACCESSIBILITY)),
+            listOf(app("com.some.reader", Access.ACCESSIBILITY, Access.DRAW_OVER_APPS)),
             shizukuRunning = false,
+            overlayKnown = true,
         )
-        assertTrue(findings.isEmpty())
+        assertTrue("no debugging channel, no finding", findings.isEmpty())
+    }
+
+    // ---- the gate, added 2026-09-12 ------------------------------------
+
+    @Test
+    fun `debugging plus screen control alone is NOT the loud finding`() {
+        // The regression this gate exists to stop. Every Bulwark user has
+        // wireless debugging on - we asked them to - and password managers,
+        // screen readers and automation tools hold Accessibility. Firing the
+        // attack wording here means firing it permanently, for most users,
+        // which teaches them to ignore the one screen that has to be trusted.
+        val finding = ratFindings(
+            debugging,
+            listOf(app("com.my.passwords", Access.ACCESSIBILITY)),
+            shizukuRunning = true,
+            overlayKnown = true,
+        ).single()
+
+        assertFalse(
+            "must not call the ordinary case an attack: ${finding.whatWouldWorry}",
+            finding.whatWouldWorry.contains("full shape of a known attack"),
+        )
+        assertTrue(
+            "must say the third piece is missing: ${finding.whatWouldWorry}",
+            finding.whatWouldWorry.contains("nothing here can do that"),
+        )
+        assertTrue(
+            "must still leave the door open to a real concern",
+            finding.whatWouldWorry.contains("com.my.passwords"),
+        )
     }
 
     @Test
-    fun `debugging plus screen control is the full shape`() {
+    fun `all three together is the loud finding`() {
         val finding = ratFindings(
-            setOf(DeviceSignal.WIRELESS_DEBUGGING_ON),
-            listOf(app("com.unknown.thing", Access.ACCESSIBILITY)),
+            debugging,
+            listOf(app("com.unknown.thing", Access.ACCESSIBILITY, Access.DRAW_OVER_APPS)),
             shizukuRunning = false,
+            overlayKnown = true,
         ).single()
 
-        assertTrue(finding.headline.contains("control your screen"))
+        assertTrue(finding.headline.contains("draw over it"))
         assertTrue(
             "must name the app so the user can go look",
             finding.whatWouldWorry.contains("com.unknown.thing"),
@@ -59,37 +96,110 @@ class RatSignalsTest {
             "must describe the actual attack",
             finding.whatWouldWorry.contains("pairs with the phone"),
         )
+        assertTrue(
+            "must say why the overlay is the deciding piece",
+            finding.whatWouldWorry.contains("makes it invisible"),
+        )
     }
+
+    @Test
+    fun `the loud finding names only the app that can do both`() {
+        // Naming every Accessibility holder would drag the user's screen
+        // reader into an attack sentence it has nothing to do with.
+        val finding = ratFindings(
+            debugging,
+            listOf(
+                app("com.innocent.reader", Access.ACCESSIBILITY),
+                app("com.both", Access.ACCESSIBILITY, Access.DRAW_OVER_APPS),
+            ),
+            shizukuRunning = false,
+            overlayKnown = true,
+        ).single()
+
+        assertTrue(finding.whatWouldWorry.contains("com.both"))
+        assertFalse(
+            "the innocent one must not appear in the attack sentence",
+            finding.whatWouldWorry.contains("com.innocent.reader"),
+        )
+    }
+
+    @Test
+    fun `unknown overlay is never reported as absent`() {
+        // Overlay comes from app-ops, which needs Shizuku. With Shizuku down
+        // the gate cannot be evaluated, and a gate that reads unknown as
+        // "nothing there" goes quiet exactly when privilege is gone. That is
+        // the failure this codebase keeps finding: a claim with no source,
+        // wearing the face of a clean result.
+        val finding = ratFindings(
+            debugging,
+            listOf(app("com.unknown.thing", Access.ACCESSIBILITY)),
+            shizukuRunning = false,
+            overlayKnown = false,
+        ).single()
+
+        assertTrue(
+            "must say the check did not finish: ${finding.whatWouldWorry}",
+            finding.whatWouldWorry.contains("could not finish this check"),
+        )
+        assertTrue(
+            "must distinguish this from a clean result",
+            finding.whatWouldWorry.contains("not the same as finding nothing"),
+        )
+        assertFalse(
+            "must not claim the third piece is missing when it was never read",
+            finding.whatWouldWorry.contains("nothing here can do that"),
+        )
+        assertTrue(
+            "must say how to complete it",
+            finding.whatWouldWorry.contains("Start Shizuku"),
+        )
+    }
+
+    // ---- properties that hold in every state ---------------------------
 
     @Test
     fun `the innocent explanation always comes first`() {
         // The property that makes this feature usable rather than frightening.
         // Every finding, in every combination, must lead with the likely cause.
-        val combinations = listOf(
-            Triple(setOf(DeviceSignal.WIRELESS_DEBUGGING_ON), emptyList<AppAccess>(), true),
-            Triple(setOf(DeviceSignal.WIRELESS_DEBUGGING_ON), emptyList<AppAccess>(), false),
-            Triple(
-                setOf(DeviceSignal.WIRELESS_DEBUGGING_ON),
-                listOf(app("com.x", Access.ACCESSIBILITY)),
-                true,
-            ),
-            Triple(
-                setOf(DeviceSignal.WIRELESS_DEBUGGING_ON),
-                listOf(app("com.x", Access.ACCESSIBILITY)),
-                false,
+        val appSets = listOf(
+            emptyList(),
+            listOf(app("com.x", Access.ACCESSIBILITY)),
+            listOf(app("com.x", Access.ACCESSIBILITY, Access.DRAW_OVER_APPS)),
+        )
+        for (apps in appSets) {
+            for (shizuku in listOf(true, false)) {
+                for (overlay in listOf(true, false)) {
+                    ratFindings(debugging, apps, shizuku, overlay).forEach {
+                        assertTrue(
+                            "every finding needs an ordinary explanation: ${it.headline}",
+                            it.innocentFirst.isNotBlank(),
+                        )
+                        assertFalse(
+                            "must not accuse: ${it.innocentFirst}",
+                            it.innocentFirst.contains("malware") ||
+                                it.innocentFirst.contains("attack"),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `never more than one finding`() {
+        // The screen shows these as cards. Two at once turns a considered
+        // statement into a wall of warnings.
+        val appSets = listOf(
+            emptyList(),
+            listOf(app("com.x", Access.ACCESSIBILITY)),
+            listOf(
+                app("com.x", Access.ACCESSIBILITY, Access.DRAW_OVER_APPS),
+                app("com.y", Access.ACCESSIBILITY),
             ),
         )
-        combinations.forEach { (signals, apps, shizuku) ->
-            ratFindings(signals, apps, shizuku).forEach {
-                assertTrue(
-                    "every finding needs an ordinary explanation: ${it.headline}",
-                    it.innocentFirst.isNotBlank(),
-                )
-                assertFalse(
-                    "must not accuse: ${it.innocentFirst}",
-                    it.innocentFirst.contains("malware") ||
-                        it.innocentFirst.contains("attack"),
-                )
+        for (apps in appSets) {
+            for (overlay in listOf(true, false)) {
+                assertTrue(ratFindings(debugging, apps, false, overlay).size <= 1)
             }
         }
     }
@@ -99,9 +209,7 @@ class RatSignalsTest {
         // Bulwark is the reason it is on. Saying anything else would be the app
         // alarming a user about its own footprint.
         val finding = ratFindings(
-            setOf(DeviceSignal.WIRELESS_DEBUGGING_ON),
-            emptyList(),
-            shizukuRunning = true,
+            debugging, emptyList(), shizukuRunning = true, overlayKnown = true,
         ).single()
         assertTrue(finding.innocentFirst.contains("Expected"))
         assertTrue(finding.innocentFirst.contains("Shizuku"))
@@ -114,9 +222,7 @@ class RatSignalsTest {
         // that is advice with an unstated cost, and the honesty rules forbid
         // exactly that - the user is the one who gets to weigh it.
         val finding = ratFindings(
-            setOf(DeviceSignal.WIRELESS_DEBUGGING_ON),
-            emptyList(),
-            shizukuRunning = false,
+            debugging, emptyList(), shizukuRunning = false, overlayKnown = true,
         ).single()
 
         assertTrue("must give the safer option", finding.whatWouldWorry.contains("Switching it off"))
@@ -144,27 +250,23 @@ class RatSignalsTest {
                 setOf(DeviceSignal.DEVELOPER_OPTIONS_ON),
                 listOf(app("com.x", Access.ACCESSIBILITY)),
                 shizukuRunning = false,
+                overlayKnown = true,
             ).size,
         )
     }
 
     @Test
-    fun `several screen controllers are all named`() {
+    fun `several apps that can hide are all named`() {
         val finding = ratFindings(
-            setOf(DeviceSignal.WIRELESS_DEBUGGING_ON),
+            debugging,
             listOf(
-                app("com.first", Access.ACCESSIBILITY),
-                app("com.second", Access.ACCESSIBILITY),
-                app("com.unrelated", Access.USAGE_ACCESS),
+                app("com.one", Access.ACCESSIBILITY, Access.DRAW_OVER_APPS),
+                app("com.two", Access.ACCESSIBILITY, Access.DRAW_OVER_APPS),
             ),
             shizukuRunning = false,
+            overlayKnown = true,
         ).single()
-
-        assertTrue(finding.whatWouldWorry.contains("com.first"))
-        assertTrue(finding.whatWouldWorry.contains("com.second"))
-        assertFalse(
-            "an app without screen control is not part of this signal",
-            finding.whatWouldWorry.contains("com.unrelated"),
-        )
+        assertTrue(finding.whatWouldWorry.contains("com.one"))
+        assertTrue(finding.whatWouldWorry.contains("com.two"))
     }
 }

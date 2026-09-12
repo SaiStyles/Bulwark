@@ -85,6 +85,17 @@ object SpecialAccessReader {
         val unavailable: List<String>,
         /** Device-level facts that matter in combination. See `RatSignals`. */
         val signals: Set<DeviceSignal> = emptySet(),
+        /**
+         * Whether "can draw over other apps" could be read at all.
+         *
+         * It comes from app-ops, which needs Shizuku, so with Shizuku down it
+         * is unknown rather than absent. `RatSignals` gates its loudest
+         * finding on overlay, and a gate that treats unknown as "nothing
+         * there" would go quiet exactly when privilege is gone. Defaults to
+         * false so a caller that forgets it under-claims instead of
+         * over-claiming.
+         */
+        val overlayKnown: Boolean = false,
     )
 
     /**
@@ -148,10 +159,12 @@ object SpecialAccessReader {
                 explain("notification listeners", it)
             }
 
+        var overlayKnown = false
         if (privileged) {
             runCatching { AppOpsAccess.holders() }
                 .onSuccess { found ->
                     found.forEach { (pkg, accesses) -> accesses.forEach { add(pkg, it) } }
+                    overlayKnown = true
                 }
                 .onFailure {
                     unavailable += "apps that can draw over others, see your app " +
@@ -167,6 +180,7 @@ object SpecialAccessReader {
             holders.mapValues { it.value.toSet() },
             unavailable,
             deviceSignals(context),
+            overlayKnown,
         )
     }
 
