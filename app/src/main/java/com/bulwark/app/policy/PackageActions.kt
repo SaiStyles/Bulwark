@@ -54,12 +54,31 @@ class PackageActions(
     private val callingPackage: String,
     /** Seam for tests. Production passes the real privileged calls. */
     private val state: StateAccess = PlatformState,
+    /**
+     * The uninstall escalation. Null where a caller only ever disables, so
+     * that asking for an escalation nobody wired fails loudly rather than
+     * silently doing nothing.
+     */
+    private val removal: Removal? = null,
 ) {
 
     /** The two privileged calls this needs, behind a seam so tests can drive them. */
     interface StateAccess {
         fun get(packageName: String, userId: Int): Int
         fun set(packageName: String, state: Int, userId: Int, callingPackage: String)
+    }
+
+    /**
+     * The escalation's two calls, behind their own seam.
+     *
+     * Separate from [StateAccess] because they are a different act: disable
+     * changes a flag, this removes the package for the user. Production binds
+     * `PackageRemoval`, which needs a `Context` for the result channel, so it
+     * is supplied at construction rather than defaulted here.
+     */
+    interface Removal {
+        fun uninstall(packageName: String, userId: Int, callingPackage: String)
+        fun installExisting(packageName: String, userId: Int)
     }
 
     private object PlatformState : StateAccess {
@@ -169,6 +188,57 @@ class PackageActions(
      */
     fun switchBackOn(packageName: String, userId: Int = 0) =
         enable(packageName, stateBeforeLastDisable(packageName), userId)
+
+    /**
+     * Removes [packageName] for this user - the escalation, not the default.
+     *
+     * `safety-rules.md` rule 3: disable comes first and this is offered on
+     * top of it. Whether Bulwark can undo it is a property of the package,
+     * read rather than assumed, and the screen states which *before* asking.
+     *
+     * The enabled-state is recorded first even though the package is going
+     * away: a restored package should come back to the state it was found in,
+     * not to whatever `install-existing` leaves behind.
+     *
+     * @throws IllegalStateException if no [Removal] was wired, or if the
+     *   package is still installed afterwards.
+     */
+    fun uninstall(packageName: String, userId: Int = 0) {
+        CommandSafety.requireMutable(packageName)
+        val remover = removal ?: error("No Removal wired; uninstall is unavailable")
+
+        val previous = runCatching { state.get(packageName, userId) }.getOrNull()
+
+        journal.perform(
+            kind = ActionKind.UNINSTALL,
+            packageName = packageName,
+            userId = userId,
+            previousState = previous,
+        ) {
+            remover.uninstall(packageName, userId, callingPackage)
+        }
+    }
+
+    /**
+     * Puts a removed package back from the copy on `/system`.
+     *
+     * Only possible for a preinstalled package. For one the user installed
+     * there is nothing to install from, which is why that is said on the row
+     * before the uninstall rather than discovered after it.
+     */
+    fun putBack(packageName: String, userId: Int = 0) {
+        CommandSafety.requireMutable(packageName)
+        val remover = removal ?: error("No Removal wired; restore is unavailable")
+
+        journal.perform(
+            kind = ActionKind.INSTALL_EXISTING,
+            packageName = packageName,
+            userId = userId,
+            previousState = null,
+        ) {
+            remover.installExisting(packageName, userId)
+        }
+    }
 
     /** The state recorded by the most recent *successful* disable, if any. */
     private fun stateBeforeLastDisable(packageName: String): Int? {

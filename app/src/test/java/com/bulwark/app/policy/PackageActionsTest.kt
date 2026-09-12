@@ -322,15 +322,24 @@ class PackageActionsTest {
         // bulk *restore* only, in writing. This test is where that exception
         // stays honest - the shape is still guarded, and the allowlist has
         // exactly one entry.
-        val bulkShaped = listOf("all", "batch", "bulk", "each", "every")
+        //
+        // Matched on whole words, not substrings. It used to use `contains`,
+        // and on 2026-09-12 `uninstall` tripped it on the "all" inside
+        // uninst-ALL - the same false-friend failure that had just been taken
+        // out of the package guard, where `com.claims.app` matched "ims". The
+        // fix is the same one: split the name into words and compare them.
+        val bulkShaped = setOf("all", "batch", "bulk", "each", "every", "everything")
         val allowed = setOf("restoreEverything")
+
+        fun words(name: String): List<String> =
+            name.split(Regex("(?=[A-Z])|_")).map { it.lowercase() }.filter { it.isNotBlank() }
 
         val offenders = PackageActions::class.java.declaredMethods
             // Kotlin emits `name$default` bridges for default arguments. They
             // are not API and tripped this guard on the first run.
             .filterNot { it.isSynthetic }
             .map { it.name }
-            .filter { name -> bulkShaped.any { name.contains(it, ignoreCase = true) } }
+            .filter { name -> words(name).any { it in bulkShaped } }
             .filterNot { it in allowed }
 
         assertTrue("no bulk apply may exist; found: $offenders", offenders.isEmpty())
