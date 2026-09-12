@@ -437,50 +437,12 @@ fun PackageListScreen(
                     )
             }
 
-            if (interrupted.isNotEmpty()) {
-                item(key = "interrupted") {
-                    InterruptedCard(interrupted.map { it.packageName })
-                }
-            }
-
-            if (!ready) {
-                item(key = "no-shizuku") {
-                    Text(
-                        "Start Shizuku to see every package. Without it Bulwark " +
-                            "can only see about half of what is installed - and " +
-                            "the half it cannot see is the preinstalled software.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(vertical = 8.dp),
-                    )
-                }
-                return@LazyColumn
-            }
-
-            error?.let { message ->
-                item(key = "error") {
-                    Card {
-                        Text(
-                            "Could not read packages. " + message,
-                            Modifier.padding(14.dp),
-                        )
-                    }
-                }
-                return@LazyColumn
-            }
-
-            if (entries == null) {
-                item(key = "loading") {
-                    Row(
-                        Modifier.fillMaxWidth().padding(24.dp),
-                        horizontalArrangement = Arrangement.Center,
-                    ) { CircularProgressIndicator() }
-                }
-                return@LazyColumn
-            }
-
-            // Offered last on purpose: it is what you do when you have
-            // finished, and it is the only place Bulwark undoes its own
-            // footprint rather than the phone's.
+            // Above the package-list guards, not below them. It sat after
+            // the `return@LazyColumn` for "no Shizuku", which made the offer
+            // unreachable in exactly the state where half of it is the useful
+            // half - wireless debugging can be closed whether or not Shizuku is
+            // running. Placed for reading order, suppressed by a guard about
+            // something else entirely.
             val closeable = whatCanBeClosed(
                 shizukuRunning = state is ShizukuState.Ready,
                 wirelessDebuggingOn = wirelessDebuggingOn,
@@ -541,6 +503,47 @@ fun PackageListScreen(
             // screen on 2026-09-12. They belong beside the list of what they
             // act on: under 371 rows this button asked for a decision without
             // showing what the decision covered.
+
+            if (interrupted.isNotEmpty()) {
+                item(key = "interrupted") {
+                    InterruptedCard(interrupted.map { it.packageName })
+                }
+            }
+
+            if (!ready) {
+                item(key = "no-shizuku") {
+                    Text(
+                        "Start Shizuku to see every package. Without it Bulwark " +
+                            "can only see about half of what is installed - and " +
+                            "the half it cannot see is the preinstalled software.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(vertical = 8.dp),
+                    )
+                }
+                return@LazyColumn
+            }
+
+            error?.let { message ->
+                item(key = "error") {
+                    Card {
+                        Text(
+                            "Could not read packages. " + message,
+                            Modifier.padding(14.dp),
+                        )
+                    }
+                }
+                return@LazyColumn
+            }
+
+            if (entries == null) {
+                item(key = "loading") {
+                    Row(
+                        Modifier.fillMaxWidth().padding(24.dp),
+                        horizontalArrangement = Arrangement.Center,
+                    ) { CircularProgressIndicator() }
+                }
+                return@LazyColumn
+            }
 
             summary?.let { s -> item(key = "summary") { SummaryCard(s) } }
 
