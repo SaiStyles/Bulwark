@@ -59,7 +59,6 @@ import android.provider.Settings
 import com.bulwark.app.permissions.DeviceSignal
 import com.bulwark.app.shizuku.CloseAction
 import com.bulwark.app.shizuku.Closeable
-import com.bulwark.app.shizuku.ShizukuGateway
 import com.bulwark.app.shizuku.doneForNowHeadline
 import com.bulwark.app.shizuku.whatCanBeClosed
 import com.bulwark.app.permissions.AppAccess
@@ -114,7 +113,6 @@ fun PackageListScreen(
     state: ShizukuState,
     runner: ActionRunner,
     exporter: LogExporter,
-    gateway: ShizukuGateway,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -494,21 +492,33 @@ fun PackageListScreen(
                 item(key = "done-for-now") {
                     DoneForNowCard(
                         closeable = closeable,
-                        onStopShizuku = {
-                            val stopped = gateway.shutDownServer()
-                            gateway.refresh()
-                            report(
-                                if (stopped) {
-                                    ActionRunner.Outcome.Done(
-                                        "Shizuku stopped. Start it again when you " +
-                                            "next want Bulwark.",
-                                    )
-                                } else {
+                        onOpenShizuku = {
+                            // Bulwark cannot stop the server - Shizuku refuses
+                            // "exit" from anyone but its own manager. Measured
+                            // 2026-09-12, see DoneForNow.
+                            val intent = context.packageManager
+                                .getLaunchIntentForPackage("moe.shizuku.privileged.api")
+                            if (intent == null) {
+                                report(
                                     ActionRunner.Outcome.Failed(
-                                        "Bulwark could not stop Shizuku. Nothing changed.",
+                                        "Bulwark could not open Shizuku. Open it from " +
+                                            "your app list and use Stop there.",
+                                    ),
+                                )
+                            } else {
+                                runCatching {
+                                    context.startActivity(
+                                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                                     )
-                                },
-                            )
+                                }.onFailure {
+                                    report(
+                                        ActionRunner.Outcome.Failed(
+                                            "Bulwark could not open Shizuku. Open it " +
+                                                "from your app list and use Stop there.",
+                                        ),
+                                    )
+                                }
+                            }
                         },
                         onOpenDeveloperOptions = {
                             runCatching {
@@ -780,7 +790,7 @@ private data class AuditOutcome(
 @Composable
 private fun DoneForNowCard(
     closeable: List<Closeable>,
-    onStopShizuku: () -> Unit,
+    onOpenShizuku: () -> Unit,
     onOpenDeveloperOptions: () -> Unit,
 ) {
     Card(Modifier.padding(top = 16.dp)) {
@@ -795,7 +805,7 @@ private fun DoneForNowCard(
                 Text(item.cost, style = MaterialTheme.typography.bodySmall)
                 TextButton(
                     onClick = when (item.action) {
-                        CloseAction.STOP_SHIZUKU -> onStopShizuku
+                        CloseAction.OPEN_SHIZUKU -> onOpenShizuku
                         CloseAction.TURN_OFF_WIRELESS_DEBUGGING -> onOpenDeveloperOptions
                     },
                 ) { Text(item.label) }

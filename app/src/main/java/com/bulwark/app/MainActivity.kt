@@ -73,7 +73,6 @@ class MainActivity : ComponentActivity() {
                         state = state,
                         runner = runner,
                         exporter = exporter,
-                        gateway = gateway,
                         modifier = Modifier.padding(innerPadding),
                     )
                 }

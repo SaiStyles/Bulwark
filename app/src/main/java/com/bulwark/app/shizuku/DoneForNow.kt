@@ -42,10 +42,32 @@ package com.bulwark.app.shizuku
  * pretend to be the action** - a button that reads like it did the thing, and
  * did not, is the false sense of protection `safety-rules.md` calls worse than
  * none.
+ *
+ * ## Both halves are signposts, and that was not the plan
+ *
+ * The design assumed Bulwark could at least stop the Shizuku server itself.
+ * The phone disagreed: `exit()` is refused server-side with "is not manager".
+ * So this screen performs nothing at all - it says what is still open, what
+ * closing it costs, and takes you to the screen that can do it.
+ *
+ * That is a smaller feature than intended and it is still worth having, because
+ * nothing else tells anyone these two things are open or what they cost. But it
+ * must not be dressed up: every label here names the app that does the work.
  */
 enum class CloseAction {
-    /** Stop the Shizuku server. Bulwark can do this itself. */
-    STOP_SHIZUKU,
+    /**
+     * Open Shizuku, where the person stops the server.
+     *
+     * **Bulwark cannot stop it.** `Shizuku.exit()` compiles and the annotation
+     * is only `@RestrictTo`, so this looked buildable right up until the phone
+     * answered:
+     *
+     *     SecurityException: Permission Denial: exit from pid=... is not manager
+     *
+     * Enforced server-side, so only Shizuku's own manager may stop it. Not
+     * fragile - impossible. Measured on the Agni 2, 2026-09-12.
+     */
+    OPEN_SHIZUKU,
 
     /** Open Developer Options. The person flips the switch. */
     TURN_OFF_WIRELESS_DEBUGGING,
@@ -82,12 +104,12 @@ fun whatCanBeClosed(
     if (shizukuRunning) {
         add(
             Closeable(
-                action = CloseAction.STOP_SHIZUKU,
-                label = "Stop Shizuku",
-                what = "Shizuku's server stops - for every app on this phone, " +
-                    "not only Bulwark. Anything else you use Shizuku for loses " +
-                    "access until it is started again. The pairing itself is " +
-                    "untouched; this is not deleting anything.",
+                action = CloseAction.OPEN_SHIZUKU,
+                label = "Open Shizuku",
+                what = "Bulwark cannot stop the Shizuku server - only Shizuku's " +
+                    "own app may do that. This opens it; the control is Stop. " +
+                    "Stopping affects every app on this phone, not only Bulwark, " +
+                    "and the pairing itself is untouched - nothing is deleted.",
                 cost = "Next time you want Bulwark, start Shizuku again. That is " +
                     "one tap, as long as wireless debugging is still on.",
             ),
@@ -122,7 +144,7 @@ fun doneForNowHeadline(closeable: List<Closeable>): String? = when {
     closeable.size == 2 ->
         "Finished for now? Shizuku is running and wireless debugging is on. " +
             "Both can be closed, and both cost a step to undo."
-    closeable.single().action == CloseAction.STOP_SHIZUKU ->
+    closeable.single().action == CloseAction.OPEN_SHIZUKU ->
         "Finished for now? Shizuku is still running."
     else ->
         "Wireless debugging is still on. Shizuku is already stopped, but the " +

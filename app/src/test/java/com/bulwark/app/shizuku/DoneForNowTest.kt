@@ -28,7 +28,7 @@ class DoneForNowTest {
         val closeable = whatCanBeClosed(shizukuRunning = true, wirelessDebuggingOn = true)
         assertEquals(2, closeable.size)
         assertEquals(
-            listOf(CloseAction.STOP_SHIZUKU, CloseAction.TURN_OFF_WIRELESS_DEBUGGING),
+            listOf(CloseAction.OPEN_SHIZUKU, CloseAction.TURN_OFF_WIRELESS_DEBUGGING),
             closeable.map { it.action },
         )
     }
@@ -82,8 +82,23 @@ class DoneForNowTest {
     fun `stopping Shizuku is described as reversible, and not as deleting anything`() {
         val stop = whatCanBeClosed(shizukuRunning = true, wirelessDebuggingOn = false).single()
         assertTrue(stop.what.contains("pairing itself is untouched"))
-        assertTrue(stop.what.contains("not deleting"))
+        assertTrue(stop.what.contains("nothing is deleted"))
         assertTrue("the undo must be named", stop.cost.contains("start Shizuku again"))
+    }
+
+    @Test
+    fun `Bulwark never claims it can stop the Shizuku server`() {
+        // Measured 2026-09-12: exit() is refused server-side, "is not manager".
+        // The design assumed Bulwark could do this; it cannot, and the label
+        // must not suggest otherwise.
+        val item = whatCanBeClosed(shizukuRunning = true, wirelessDebuggingOn = false).single()
+        assertEquals(CloseAction.OPEN_SHIZUKU, item.action)
+        assertEquals("Open Shizuku", item.label)
+        assertTrue(
+            "must say Bulwark cannot: ${item.what}",
+            item.what.contains("Bulwark cannot stop the Shizuku server"),
+        )
+        assertTrue(item.what.contains("only Shizuku's own app"))
     }
 
     @Test
