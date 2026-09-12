@@ -103,6 +103,34 @@ class ReconcileTest {
     }
 
     @Test
+    fun anUninstalledRowOffersAnUndoOnlyWhenThereIsOneToOffer() {
+        // 2026-09-12: Changes showed "Put back" for a Play-installed app and
+        // let it be pressed, after the Apps row had correctly said Bulwark
+        // could not restore it. The authentication was spent to reach a
+        // refusal.
+        val preinstalled = Change("com.oem.bloat", ChangeKind.UNINSTALLED)
+        val theirs = Change("com.instagram.android", ChangeKind.UNINSTALLED)
+        val restorable = setOf("com.oem.bloat")
+
+        assertTrue(preinstalled.canBeUndone(restorable))
+        assertFalse(theirs.canBeUndone(restorable))
+        assertTrue(
+            "and it must say why rather than going quiet: ${theirs.whyNoUndo()}",
+            theirs.whyNoUndo().contains("no copy on the phone"),
+        )
+    }
+
+    @Test
+    fun everyOtherKindKeepsItsUndoWhateverTheRestoreSurfaceSays() {
+        // The restore surface answers for uninstalls only. A switched-off app
+        // is put back by enabling it, which needs no copy of anything.
+        listOf(ChangeKind.SWITCHED_OFF, ChangeKind.PERMISSION_TAKEN, ChangeKind.INTERNET_BLOCKED)
+            .forEach { kind ->
+                assertTrue("$kind", Change("com.example.app", kind).canBeUndone(emptySet()))
+            }
+    }
+
+    @Test
     fun theHeadlineSaysHowManyAreNotBulwarksOwn() {
         val changes = listOf(off("com.example.one"))
             .reconciledWith(DeviceDisabled(setOf("com.example.one", "com.example.orphan")))

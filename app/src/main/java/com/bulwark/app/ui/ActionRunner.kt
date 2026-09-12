@@ -7,6 +7,7 @@ import androidx.lifecycle.lifecycleScope
 import com.bulwark.app.policy.Change
 import com.bulwark.app.policy.currentChanges
 import com.bulwark.app.policy.DeviceDisabledReader
+import com.bulwark.app.shizuku.PackageRemoval
 import com.bulwark.app.policy.Reconciliation
 import com.bulwark.app.policy.reconciledWith
 import com.bulwark.app.policy.ActionJournal
@@ -262,7 +263,14 @@ class ActionRunner(
      * Privileged reads, so callers must keep this off the main thread.
      */
     fun changes(): Reconciliation =
-        journal.history().currentChanges().reconciledWith(deviceDisabled.read())
+        journal.history().currentChanges().reconciledWith(
+            deviceDisabled.read(),
+            // What can actually be put back, asked of the phone. Empty on
+            // failure rather than assumed-everything: an undo offered on a
+            // guess is the offer that wastes an authentication to reach a
+            // refusal.
+            runCatching { PackageRemoval.restorable() }.getOrDefault(emptySet()),
+        )
 
     /**
      * Authenticates once, then takes one permission away from chosen apps.

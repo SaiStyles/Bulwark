@@ -23,6 +23,8 @@ import androidx.compose.ui.unit.dp
 import com.bulwark.app.permissions.wordsFor
 import com.bulwark.app.ui.theme.CautionText
 import com.bulwark.app.policy.Change
+import com.bulwark.app.policy.canBeUndone
+import com.bulwark.app.policy.whyNoUndo
 import com.bulwark.app.policy.Reconciliation
 import com.bulwark.app.policy.ChangeKind
 import com.bulwark.app.policy.changesHeadline
@@ -134,7 +136,7 @@ fun ChangesScreen(
         }
 
         items(list.orEmpty(), key = { "${it.kind}:${it.packageName}:${it.permission}" }) { change ->
-            ChangeRow(change, runner, onOutcome)
+            ChangeRow(change, result?.restorable.orEmpty(), runner, onOutcome)
             HorizontalDivider()
         }
 
@@ -200,6 +202,7 @@ fun ChangesScreen(
 @Composable
 private fun ChangeRow(
     change: Change,
+    restorable: Set<String>,
     runner: ActionRunner,
     onOutcome: (ActionRunner.Outcome) -> Unit,
 ) {
@@ -218,6 +221,18 @@ private fun ChangeRow(
             Text(wordsFor(it).name, style = MaterialTheme.typography.labelLarge)
         }
         Text(change.describe(), style = MaterialTheme.typography.bodySmall)
+
+        // No button where Bulwark cannot do the thing the button names. The
+        // sentence says why, so the row is still informative - it just stops
+        // offering to spend an authentication on a refusal.
+        if (!change.canBeUndone(restorable)) {
+            Text(
+                change.whyNoUndo(),
+                style = MaterialTheme.typography.bodySmall,
+                color = CautionText,
+            )
+            return@Column
+        }
 
         TextButton(
             enabled = !busy,

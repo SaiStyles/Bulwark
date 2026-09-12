@@ -101,7 +101,28 @@ data class Reconciliation(
     val changes: List<Change>,
     val deviceUnknown: Boolean,
     val alreadyBack: Int,
+    /**
+     * Removed packages Bulwark can actually put back - those whose APK is
+     * still on `/system`, read from the device rather than assumed.
+     *
+     * A package the user installed themselves is not here, and the row must
+     * not offer an undo for it. On 2026-09-12 Changes showed "Put back" for
+     * `ch.protonmail.android` and let it be pressed, after the Apps row had
+     * correctly said Bulwark could not restore it. Offering an action already
+     * known to be impossible is the failure `safety-rules.md` forbids, and it
+     * spent someone's authentication to reach a refusal.
+     */
+    val restorable: Set<String> = emptySet(),
 )
+
+/** True when Bulwark can undo this particular row. */
+fun Change.canBeUndone(restorable: Set<String>): Boolean =
+    kind != ChangeKind.UNINSTALLED || packageName in restorable
+
+/** Why the undo is missing, for a row that cannot offer one. */
+fun Change.whyNoUndo(): String =
+    "You installed this one, so there is no copy on the phone for Bulwark to " +
+        "put back. Reinstall it from wherever you got it; its data is gone."
 
 /**
  * Merges what Bulwark recorded with what the phone actually shows.
@@ -119,9 +140,12 @@ data class Reconciliation(
  *
  * Pure, so all three are tested without a device.
  */
-fun List<Change>.reconciledWith(device: DeviceDisabled?): Reconciliation {
+fun List<Change>.reconciledWith(
+    device: DeviceDisabled?,
+    restorable: Set<String> = emptySet(),
+): Reconciliation {
     if (device == null) {
-        return Reconciliation(this, deviceUnknown = true, alreadyBack = 0)
+        return Reconciliation(this, deviceUnknown = true, alreadyBack = 0, restorable = restorable)
     }
     val (switchedOff, others) = partition { it.kind == ChangeKind.SWITCHED_OFF }
     // Absence only counts as evidence when the read finished. A partial read
@@ -145,6 +169,7 @@ fun List<Change>.reconciledWith(device: DeviceDisabled?): Reconciliation {
         changes = (stillOff + others).sortedByDescending { it.atEpochMillis } + unrecorded,
         deviceUnknown = false,
         alreadyBack = switchedOff.size - stillOff.size,
+        restorable = restorable,
     )
 }
 
