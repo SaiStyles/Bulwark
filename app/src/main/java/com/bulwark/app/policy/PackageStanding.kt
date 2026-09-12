@@ -30,10 +30,9 @@ enum class Restorability {
 }
 
 /**
- * @property jobs what this phone says the package does. Empty is not proof of
- *   ordinariness while [checkIncomplete] is true.
- * @property checkIncomplete a critical-role read failed, so the holder we
- *   could not read might be this package.
+ * @property jobs what this phone says the package does.
+ * @property checkIncomplete a critical-role read failed. Said on the row, but
+ *   deliberately not escalated - see [Standing.needsCeremony].
  * @property isSelf Bulwark itself.
  */
 data class Standing(
@@ -59,12 +58,18 @@ data class Standing(
     /**
      * Warnings, then typing the name, then authentication.
      *
-     * **Fires on an incomplete check too.** If Bulwark could not read who the
-     * dialer is, the package in front of you might be the dialer, and treating
-     * an unread check as an all-clear is the failure this project keeps
-     * paying for.
+     * **Only for packages this phone actually named.** An earlier version also
+     * fired on [checkIncomplete] - fail closed, so treat an unread job as
+     * possibly this package. That was wrong in the way A2b was wrong before it
+     * was gated on overlay: a condition that fires on nearly everything is not
+     * a warning, it is friction, and it teaches people to type through the one
+     * that mattered. One failed read would have put the ceremony on all 370.
+     *
+     * So an incomplete check is *said* rather than escalated - it appears in
+     * [labels] and the screen says which job could not be read. Honest, and
+     * still quiet enough that the ceremony keeps its meaning.
      */
-    val needsCeremony: Boolean get() = !refused && (isCritical || checkIncomplete)
+    val needsCeremony: Boolean get() = !refused && isCritical
 }
 
 /** What one job means, in the words a person is shown. */
@@ -106,8 +111,7 @@ fun Standing.labels(): List<String> = buildList {
     CriticalRoles.Job.entries.filter { it in jobs }.forEach { add(it.sentence()) }
     if (checkIncomplete) {
         add(
-            "Bulwark could not finish checking what this does on your phone, so " +
-                "it is treating it as something that might matter."
+            "Bulwark could not finish checking what this does on your phone."
         )
     }
     add(
@@ -130,12 +134,11 @@ fun Standing.labels(): List<String> = buildList {
  */
 fun Standing.secondWarning(): String? {
     if (!needsCeremony) return null
-    val consequences = CriticalRoles.Job.entries.filter { it in jobs }.map { it.sentence() }
-    val head = when {
-        consequences.isEmpty() ->
-            "Bulwark could not confirm what this package does on your phone."
-        else -> consequences.joinToString(" ")
-    }
+    // Non-empty by construction: the ceremony only fires when the phone named
+    // at least one job, so the warning always has a consequence to state.
+    val head = CriticalRoles.Job.entries
+        .filter { it in jobs }
+        .joinToString(" ") { it.sentence() }
     val tail = when (restorability) {
         Restorability.BULWARK_CAN_RESTORE ->
             "Bulwark can put it back, but not the data, and not while the phone " +
@@ -158,3 +161,57 @@ fun Standing.confirmationPhrase(): String = packageName
 /** True when [typed] releases the action. Whitespace is forgiven; case is not. */
 fun Standing.confirmationAccepts(typed: String): Boolean =
     typed.trim() == confirmationPhrase()
+
+/**
+ * The short word on the row's badge.
+ *
+ * Names the job rather than rating the package - the badge used to say
+ * RECOMMENDED or RISKY, which was a stranger's verdict wearing Bulwark's
+ * colours.
+ */
+fun CriticalRoles.Job.badge(): String = when (this) {
+    CriticalRoles.Job.HOME -> "HOME SCREEN"
+    CriticalRoles.Job.DIALER -> "DIALER"
+    CriticalRoles.Job.SMS -> "MESSAGES"
+    CriticalRoles.Job.SYSTEM_UI -> "SYSTEM UI"
+    CriticalRoles.Job.SETTINGS -> "SETTINGS"
+    CriticalRoles.Job.PACKAGE_INSTALLER -> "INSTALLER"
+    CriticalRoles.Job.IMS -> "CALLS"
+}
+
+/**
+ * The badge, or null where the row needs none.
+ *
+ * One badge at most. `design.md` rule 5: never more than one loud thing on a
+ * screen, and a row that shouts twice has said nothing. When the phone names
+ * several jobs the first in declaration order wins, which is the same fixed
+ * order [labels] uses, so a row never reorders itself between reads.
+ */
+fun Standing.badge(): String? = when {
+    refused -> "BULWARK"
+    else -> CriticalRoles.Job.entries.firstOrNull { it in jobs }?.badge()
+}
+
+/**
+ * What Bulwark is prepared to say about one package, assembled.
+ *
+ * [roles] null means the reading has not arrived yet - which is *not* the same
+ * as a phone with no dialer, so it becomes an incomplete check rather than an
+ * all-clear. It does not fire the ceremony; see [Standing.needsCeremony].
+ */
+fun standingFor(
+    packageName: String,
+    isSystem: Boolean,
+    roles: CriticalRoles.Reading?,
+    selfPackage: String,
+): Standing = Standing(
+    packageName = packageName,
+    jobs = roles?.jobsFor(packageName).orEmpty(),
+    restorability = if (isSystem) {
+        Restorability.BULWARK_CAN_RESTORE
+    } else {
+        Restorability.GONE_FOR_GOOD
+    },
+    checkIncomplete = roles == null || !roles.complete,
+    isSelf = packageName == selfPackage,
+)

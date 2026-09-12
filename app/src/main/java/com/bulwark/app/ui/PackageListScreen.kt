@@ -49,8 +49,13 @@ import com.bulwark.app.ui.theme.RatingUnsafe
 import com.bulwark.app.ui.theme.Refused
 import com.bulwark.app.ui.theme.WorthLookingAt
 import com.bulwark.app.debloat.CatalogEntry
+import com.bulwark.app.policy.Standing
+import com.bulwark.app.policy.badge
+import com.bulwark.app.policy.labels
+import com.bulwark.app.policy.standingFor
+import com.bulwark.app.policy.Restorability
+import com.bulwark.app.shizuku.CriticalRoles
 import com.bulwark.app.debloat.PackageCatalog
-import com.bulwark.app.debloat.RemovalRating
 import com.bulwark.app.debloat.UadDatabase
 import com.bulwark.app.debloat.readableDescription
 import com.bulwark.app.policy.ActionRecord
@@ -161,6 +166,11 @@ fun PackageListScreen(
     // Capabilities whose flag read has come back. Until a permission is in
     // here, its rows are still being checked and no control is drawn.
     var refinedPermissions by remember { mutableStateOf(emptySet<String>()) }
+    // What this phone says its critical jobs belong to. Null until it lands,
+    // which standingFor treats as an unfinished check rather than an all-clear.
+    // Needs no privilege - these are ordinary reads, so the labels are right
+    // even with Shizuku down.
+    var roles by remember { mutableStateOf<CriticalRoles.Reading?>(null) }
 
     fun report(outcome: ActionRunner.Outcome) {
         val message = when (outcome) {
@@ -252,6 +262,13 @@ fun PackageListScreen(
     // fetch "is there anything to export" alongside; that moved to the Changes
     // screen with the export button, and reading it here was left behind doing
     // a query on every reload for a value nothing rendered.
+    LaunchedEffect(reload) {
+        // Queries several system services, so off the main thread like the rest.
+        roles = withContext(Dispatchers.IO) {
+            runCatching { CriticalRoles.read(context) }.getOrNull()
+        }
+    }
+
     LaunchedEffect(reload) {
         interrupted = withContext(Dispatchers.IO) {
             runCatching { runner.interrupted() }.getOrDefault(emptyList())
@@ -603,7 +620,15 @@ fun PackageListScreen(
             }
 
             items(shown, key = { it.packageName }) { entry ->
-                PackageRow(entry, runner, entry.packageName in blockedApps, ::report)
+                PackageRow(
+                    entry,
+                    standingFor(
+                        entry.packageName, entry.isSystem, roles, context.packageName,
+                    ),
+                    runner,
+                    entry.packageName in blockedApps,
+                    ::report,
+                )
             }
         }
       }
@@ -824,11 +849,15 @@ private fun InterruptedCard(packages: List<String>) {
 @Composable
 private fun PackageRow(
     entry: CatalogEntry,
+    standing: Standing,
     runner: ActionRunner,
     isBlocked: Boolean,
     onOutcome: (ActionRunner.Outcome) -> Unit,
 ) {
     var busy by remember(entry.packageName) { mutableStateOf(false) }
+    // Non-null while the ceremony is open. Keyed per row, so a typed name can
+    // never travel from one package to another.
+    var ceremonyFor by remember(entry.packageName) { mutableStateOf<Standing?>(null) }
 
     // The per-app permission view, folded away until asked for. Closed by
     // default because reading one app's permissions costs a binder call per
@@ -863,10 +892,29 @@ private fun PackageRow(
         )
     }
 
+    ceremonyFor?.let { target ->
+        RemovalCeremony(
+            standing = target,
+            onDismiss = { ceremonyFor = null },
+            onConfirmed = {
+                ceremonyFor = null
+                busy = true
+                runner.uninstall(
+                    target.packageName,
+                    target.packageName,
+                    target.restorability == Restorability.BULWARK_CAN_RESTORE,
+                ) {
+                    busy = false
+                    onOutcome(it)
+                }
+            },
+        )
+    }
+
     Card {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Badge(entry)
+                StandingBadge(standing)
                 Text(
                     entry.packageName,
                     style = MaterialTheme.typography.bodyMedium,
@@ -895,12 +943,32 @@ private fun PackageRow(
                     "You can switch it off. It stays installed, keeps its data, " +
                         "and you can switch it back on here."
                 )
-                if (entry.options.canUninstall) {
-                    Reason(
-                        "The database also rates this removable entirely. " +
-                            "Bulwark cannot uninstall yet."
-                    )
-                }
+                // Derived from this phone, not from a rating. Says what the
+                // package does here and whether Bulwark could put it back.
+                standing.labels().forEach { Reason(it) }
+
+                OutlinedButton(
+                    enabled = !busy && !standing.refused,
+                    onClick = {
+                        // The ceremony only stands in front of packages the
+                        // phone named. Everything else goes straight to the
+                        // system prompt - a gate on all 370 would be friction
+                        // that teaches people to tap through the real one.
+                        if (standing.needsCeremony) {
+                            ceremonyFor = standing
+                        } else {
+                            busy = true
+                            runner.uninstall(
+                                entry.packageName,
+                                entry.packageName,
+                                standing.restorability == Restorability.BULWARK_CAN_RESTORE,
+                            ) {
+                                busy = false
+                                onOutcome(it)
+                            }
+                        }
+                    },
+                ) { Text("Remove") }
             }
 
             // One app, one decision, same as everything else here. Blocking
@@ -1008,33 +1076,22 @@ private fun PackageRow(
 }
 
 @Composable
-private fun Reason(text: String) {
-    Text(text, style = MaterialTheme.typography.bodySmall)
-}
-
-@Composable
-private fun Badge(entry: CatalogEntry) {
-    val (label, colour) = when {
-        entry.options.isRefused -> "LOCKED" to Refused
-        // UAD's own word, not ours. "SAFE" was Bulwark promising nothing
-        // would change; Recommended only means most people can remove it.
-        // com.google.android.as.oss is rated Recommended and is a dependency
-        // of System Intelligence - both true at once.
-        entry.rating == RemovalRating.RECOMMENDED -> "RECOMMENDED" to RatingRecommended
-        entry.rating == RemovalRating.ADVANCED -> "CARE" to RatingAdvanced
-        entry.rating == RemovalRating.EXPERT -> "EXPERT" to RatingExpert
-        entry.rating == RemovalRating.UNSAFE -> "RISKY" to RatingUnsafe
-        else -> "UNKNOWN" to Color.Gray
-    }
+private fun StandingBadge(standing: Standing) {
+    val label = standing.badge() ?: return
     Text(
         label,
         style = MaterialTheme.typography.labelSmall,
         color = Color.White,
         modifier = Modifier
             .clip(RoundedCornerShape(4.dp))
-            .background(colour)
+            .background(Refused)
             .padding(horizontal = 6.dp, vertical = 2.dp),
     )
+}
+
+@Composable
+private fun Reason(text: String) {
+    Text(text, style = MaterialTheme.typography.bodySmall)
 }
 
 /**

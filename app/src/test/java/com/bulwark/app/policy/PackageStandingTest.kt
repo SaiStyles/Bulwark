@@ -1,5 +1,6 @@
 package com.bulwark.app.policy
 
+import com.bulwark.app.shizuku.CriticalRoles
 import com.bulwark.app.shizuku.CriticalRoles.Job
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -47,18 +48,34 @@ class PackageStandingTest {
     }
 
     @Test
-    fun anUnfinishedCheckIsTreatedAsPossiblyCritical() {
-        // Fail closed. The holder Bulwark could not read might be this one,
-        // and an unread check read as an all-clear is the failure this project
-        // keeps paying for.
+    fun anUnfinishedCheckIsSaidOutLoudButDoesNotEscalate() {
+        // It used to fire the ceremony, on fail-closed reasoning. One failed
+        // read would then have put the ceremony on all 370 packages, and a
+        // gate that fires on nearly everything teaches people to type through
+        // the one that mattered - the same narrowing A2b already needed.
         val s = standing(incomplete = true)
 
         assertFalse("nothing was found, so it is not known to be critical", s.isCritical)
-        assertTrue("but it still takes the ceremony", s.needsCeremony)
+        assertFalse("and an ordinary app must not inherit the ceremony", s.needsCeremony)
         assertTrue(
-            "and it says so rather than implying an all-clear",
+            "but it is still said, rather than reading as an all-clear",
             s.labels().any { it.contains("could not finish checking") },
         )
+    }
+
+    @Test
+    fun anEverydayAppNeverGetsTheCeremonyHoweverTheCheckWent() {
+        // Instagram, and the other 93 like it. The ceremony is for the handful
+        // the phone actually named.
+        listOf(true, false).forEach { incomplete ->
+            val s = standing(
+                name = "com.instagram.android",
+                restorability = Restorability.GONE_FOR_GOOD,
+                incomplete = incomplete,
+            )
+            assertFalse("incomplete=$incomplete", s.needsCeremony)
+            assertNull("incomplete=$incomplete", s.secondWarning())
+        }
     }
 
     @Test
@@ -110,6 +127,44 @@ class PackageStandingTest {
 
         assertEquals(one, two)
         assertTrue("home comes first", one.first().contains("home screen"))
+    }
+
+    @Test
+    fun theBadgeNamesTheJobRatherThanRatingThePackage() {
+        assertEquals("DIALER", standing(jobs = setOf(Job.DIALER)).badge())
+        assertEquals("BULWARK", standing(isSelf = true).badge())
+        assertNull("an ordinary app wears no badge", standing().badge())
+    }
+
+    @Test
+    fun onlyOneBadgeEvenWhenThePhoneNamesSeveralJobs() {
+        // design.md rule 5 - a row that shouts twice has said nothing. And it
+        // must not reorder itself between reads, so declaration order wins.
+        val both = standing(jobs = setOf(Job.IMS, Job.HOME))
+
+        assertEquals("HOME SCREEN", both.badge())
+        assertEquals(both.badge(), standing(jobs = setOf(Job.HOME, Job.IMS)).badge())
+    }
+
+    @Test
+    fun aReadingThatHasNotArrivedIsNotAnAllClear() {
+        // Null is "not read yet", which is not the same as a phone with no
+        // dialer. It must not quietly render as ordinary.
+        val s = standingFor("com.example.app", isSystem = true, roles = null, selfPackage = "com.bulwark.app")
+
+        assertTrue(s.checkIncomplete)
+        assertFalse("but it still does not escalate", s.needsCeremony)
+    }
+
+    @Test
+    fun restorabilityFollowsWhetherThePackageWasPreinstalled() {
+        val roles = CriticalRoles.Reading(emptyMap(), emptySet())
+        val preinstalled = standingFor("com.oem.bloat", true, roles, "com.bulwark.app")
+        val theirs = standingFor("com.instagram.android", false, roles, "com.bulwark.app")
+
+        assertEquals(Restorability.BULWARK_CAN_RESTORE, preinstalled.restorability)
+        assertEquals(Restorability.GONE_FOR_GOOD, theirs.restorability)
+        assertFalse("a complete reading is not an incomplete check", preinstalled.checkIncomplete)
     }
 
     @Test

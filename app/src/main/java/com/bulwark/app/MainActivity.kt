@@ -27,6 +27,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import com.bulwark.app.policy.ActionJournal
 import com.bulwark.app.policy.PackageActions
+import com.bulwark.app.shizuku.PackageRemoval
 import com.bulwark.app.policy.FirewallActions
 import com.bulwark.app.policy.PermissionActions
 import com.bulwark.app.policy.SqliteActionLog
@@ -63,7 +64,25 @@ class MainActivity : ComponentActivity() {
         val journal = ActionJournal(SqliteActionLog(applicationContext))
         runner = ActionRunner(
             activity = this,
-            actions = PackageActions(journal, packageName),
+            actions = PackageActions(
+                journal, packageName,
+                removal = object : PackageActions.Removal {
+                    // The escalation's binder work. Bound here rather than
+                    // defaulted inside PackageActions because it needs a
+                    // Context for the result channel, and the policy layer
+                    // stays free of Android for its tests.
+                    override fun uninstall(
+                        packageName: String,
+                        userId: Int,
+                        callingPackage: String,
+                    ) = PackageRemoval.uninstall(
+                        applicationContext, packageName, userId, callingPackage,
+                    )
+
+                    override fun installExisting(packageName: String, userId: Int) =
+                        PackageRemoval.installExisting(packageName, userId)
+                },
+            ),
             journal = journal,
             permissions = PermissionActions(journal),
             // System-ness from our own PackageManager, not the privileged one:

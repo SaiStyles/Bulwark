@@ -161,6 +161,53 @@ class ActionRunner(
     }
 
     /**
+     * Authenticates, then removes [packageName] for this user.
+     *
+     * The escalation. Anything the phone named as critical has already been
+     * through `RemovalCeremony` before this is called - two warnings and the
+     * name typed by hand - and this adds the part an Accessibility service
+     * cannot fake, which is the system's own prompt.
+     *
+     * @param canRestore whether Bulwark will be able to put it back. It
+     *   changes the sentence a person reads *while deciding*, so it is passed
+     *   rather than guessed at here.
+     */
+    fun uninstall(
+        packageName: String,
+        label: String,
+        canRestore: Boolean,
+        onOutcome: (Outcome) -> Unit,
+    ) = authenticated(
+        title = "Remove $label",
+        reason = if (canRestore) {
+            "Remove $packageName for this user. It came with the phone, so " +
+                "Bulwark can put it back - its data cannot come back."
+        } else {
+            "Remove $packageName and its data. You installed this one, so " +
+                "Bulwark cannot put it back."
+        },
+        onOutcome = onOutcome,
+    ) {
+        actions.uninstall(packageName)
+        if (canRestore) "Removed $label. You can put it back." else "Removed $label."
+    }
+
+    /** Authenticates, then reinstalls a preinstalled package from `/system`. */
+    fun putBack(
+        packageName: String,
+        label: String,
+        onOutcome: (Outcome) -> Unit,
+    ) = authenticated(
+        title = "Put $label back",
+        reason = "Reinstall $packageName from the copy that came with the phone. " +
+            "Its old data is not restored.",
+        onOutcome = onOutcome,
+    ) {
+        actions.putBack(packageName)
+        "Put $label back."
+    }
+
+    /**
      * Authenticates once, then puts every changed package back.
      *
      * One authentication for the whole operation, because it is one intent -
