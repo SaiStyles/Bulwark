@@ -95,7 +95,7 @@ class PackageActionsTest {
         val state = FakeState()
         val (act, log) = actions(state)
 
-        val thrown = runCatching { act.disable("com.android.phone") }.exceptionOrNull()
+        val thrown = runCatching { act.disable("com.bulwark.app") }.exceptionOrNull()
 
         assertTrue(thrown is SecurityException)
         assertTrue("must not have read state", state.reads.isEmpty())

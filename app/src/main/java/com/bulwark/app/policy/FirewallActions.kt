@@ -39,17 +39,42 @@ import com.bulwark.app.shizuku.CommandSafety
  * `CommandSafety` is explicit that a caller who can claim "not a system app"
  * can unlock every OEM-renamed telephony package, and that stays true here.
  *
- * ## Why telephony is refused from a *firewall*
+ * ## Why calling is refused from a *firewall*
  *
  * It reads like over-caution until you notice modern calling is data. Cutting
  * the IMS stack off the network can take voice calling with it, including the
- * emergency call that `safety-rules.md` will not trade away. The never-remove
- * list is the same list for the same reason.
+ * emergency call that `safety-rules.md` will not trade away.
+ *
+ * **This used to come from the never-remove list**, and when that list was
+ * retired on 2026-09-12 this protection went with it by accident - a decision
+ * about uninstalling packages silently changed what the firewall would block.
+ * Blocking has no ceremony in front of it, so that would have been one tap
+ * between a user and no emergency calling.
+ *
+ * So it now asks the phone instead, through [CriticalPackages], which
+ * production backs with `CriticalRoles` - the IMS provider and the dialers,
+ * named by the device rather than guessed from a package name. Narrower than
+ * the old list and correct on phones nobody has profiled.
+ *
+ * Refusal rather than a ceremony is an interim: the ceremony exists for
+ * removal and not yet for blocking. Recorded on `layers/03-firewall.md`.
  */
 class FirewallActions(
     private val journal: ActionJournal,
     private val systemPackages: SystemPackages,
+    /**
+     * Whether this phone says the package carries calls.
+     *
+     * Defaults to "no" so existing callers keep compiling, and production
+     * supplies the real reading. A test drives both sides.
+     */
+    private val criticalToCalling: CriticalPackages = CriticalPackages { false },
 ) {
+
+    /** Whether the device names this package as part of placing calls. */
+    fun interface CriticalPackages {
+        fun carriesCalls(packageName: String): Boolean
+    }
 
     /**
      * Whether a package shipped with the phone.
@@ -72,6 +97,13 @@ class FirewallActions(
      */
     fun block(packageName: String) {
         CommandSafety.requireMutable(packageName, systemPackages.isSystem(packageName))
+        if (criticalToCalling.carriesCalls(packageName)) {
+            throw SecurityException(
+                "Refusing to block $packageName. This phone says it is part of " +
+                    "placing calls, and cutting it off the network can stop " +
+                    "calls working, including emergency calls.",
+            )
+        }
         if (packageName in blocked()) return // Already asked for. Record nothing.
 
         journal.perform(

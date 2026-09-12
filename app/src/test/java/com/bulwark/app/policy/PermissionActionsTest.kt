@@ -103,14 +103,15 @@ class PermissionActionsTest {
 
     @Test
     fun `a protected package is refused before anything is read`() {
-        // The guard runs first, so a package on the never-remove list is never
-        // even asked about. Stripping READ_PHONE_STATE from a telephony
-        // component is another route to a phone that cannot call for help.
+        // The guard runs first, so a refused package is never even asked
+        // about. The example is Bulwark itself since 2026-09-12 - the list is
+        // one entry now, and what stands in front of critical packages is a
+        // ceremony rather than a refusal.
         val access = FakeAccess()
         val (act, log) = actions(access)
 
         val failure = runCatching {
-            act.revoke("com.android.phone", "android.permission.READ_PHONE_STATE")
+            act.revoke("com.bulwark.app", "android.permission.READ_PHONE_STATE")
         }.exceptionOrNull()
 
         assertTrue(failure is SecurityException)
@@ -309,13 +310,13 @@ class PermissionActionsTest {
 
     @Test
     fun `a batch still refuses a protected package, and stops there`() {
-        // Every step passes the same guards as a single action. A batch is not
-        // a way around the never-remove list.
+        // Every step passes the same guards as a single action. A batch is
+        // not a way around a refusal.
         val access = FakeAccess(setOf("com.a" to camera))
         val (act, _) = actions(access)
 
         val steps = act.revokeAcrossApps(
-            camera, listOf("com.android.phone", "com.a"),
+            camera, listOf("com.bulwark.app", "com.a"),
         )
 
         assertEquals(1, steps.size)

@@ -23,30 +23,36 @@ class PackageCatalogTest {
     }
 
     @Test
-    fun `things that break the route back are still refused outright`() {
+    fun `the packages that used to be refused are now offered`() {
+        // Retired 2026-09-12. These were the hard floor; the phone now names
+        // the critical ones itself and a ceremony stands in front of them,
+        // rather than Bulwark deciding on the owner's behalf.
         val c = catalog()
         listOf("com.android.systemui", "com.android.phone", "com.google.android.networkstack")
             .forEach { name ->
                 val r = c.build(listOf(name), setOf(name)).single()
-                assertTrue("$name must be refused", r.options.isRefused)
-                assertFalse(r.options.canDisable)
+                assertFalse("$name must no longer be refused", r.options.isRefused)
+                assertTrue(r.options.canDisable)
             }
     }
 
     @Test
-    fun `every refusal explains itself`() {
-        val r = catalog().build(listOf("com.android.phone"), setOf("com.android.phone")).single()
+    fun `the one refusal explains itself`() {
+        val r = catalog().build(listOf("com.bulwark.app"), emptySet()).single()
         assertTrue(r.options.refusal!!.isNotBlank())
+        assertTrue(r.options.refusal!!.contains("cannot remove itself"))
     }
 
     @Test
-    fun `the hard floor wins even when the database says Recommended`() {
-        // Telephony breaks the route back: you cannot call for help about a
-        // phone that cannot call. No database entry raises that floor.
+    fun `the database no longer decides what may be uninstalled`() {
+        // The rating used to gate the escalation - Recommended and Advanced
+        // only. That was a stranger's verdict deciding what the owner of the
+        // phone was allowed to want, and it went with the badges.
         val c = catalog("com.mediatek.ims" to entry(RemovalRating.RECOMMENDED))
         val r = c.build(listOf("com.mediatek.ims"), setOf("com.mediatek.ims")).single()
-        assertFalse(r.isOffered)
-        assertTrue(r.options.isRefused)
+        assertTrue(r.isOffered)
+        assertTrue(r.options.canUninstall)
+        assertFalse(r.options.isRefused)
     }
 
     @Test
@@ -56,7 +62,7 @@ class PackageCatalogTest {
         // just Lava software nobody has audited, not landmines.
         val r = catalog().build(listOf("com.pri.applock"), setOf("com.pri.applock")).single()
         assertTrue("must be offered", r.options.canDisable)
-        assertFalse("but not uninstallable", r.options.canUninstall)
+        assertTrue("and removable too, since 2026-09-12", r.options.canUninstall)
         assertTrue(
             "must say nobody documented it: ${r.options.warning}",
             r.options.warning!!.contains("Nobody has documented"),
@@ -64,11 +70,13 @@ class PackageCatalogTest {
     }
 
     @Test
-    fun `a risky package can still be switched off, but never uninstalled`() {
+    fun `a risky package is described, not withheld`() {
+        // The description is what Bulwark stands behind and it still appears.
+        // The rating no longer decides anything - it is not shown at all.
         val c = catalog("com.android.mtp" to entry(RemovalRating.UNSAFE, "MTP Host"))
         val r = c.build(listOf("com.android.mtp"), setOf("com.android.mtp")).single()
         assertTrue(r.options.canDisable)
-        assertFalse(r.options.canUninstall)
+        assertTrue(r.options.canUninstall)
         assertTrue(r.options.warning!!.contains("MTP"))
     }
 

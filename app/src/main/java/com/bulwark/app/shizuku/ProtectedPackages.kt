@@ -1,160 +1,69 @@
 package com.bulwark.app.shizuku
 
 /**
- * Two tiers: what Bulwark refuses outright, and what it warns about.
+ * What Bulwark refuses, and what it warns about.
  *
- * ## The line, narrowed 2026-09-10
+ * ## The blocklist is gone — 2026-09-12
  *
- * The hard floor is **not** "this is dangerous". Two things put a package on it,
- * and nothing else does.
+ * This file used to hold two lists of name fragments and exact names, and
+ * refused 72 of the test device's 274 system packages. It was retired by SAI's
+ * decision, on two measurements:
  *
- * **1. It breaks the thing you would use to undo it.**
+ * - **It worked by luck of naming.** It caught `com.mediatek.ims` because that
+ *   vendor used the word "ims". A vendor using a codename would have been
+ *   protected by nothing, so the guarantee was real on one phone and theatre
+ *   on every other - which the honesty rules forbid more clearly than they
+ *   ever demanded a blocklist.
+ * - **It mislabelled.** `com.google.android.ims` reports as user-installed
+ *   here, so the fragments skipped it; extending them to catch it would have
+ *   named Carrier Services as critical telephony when the device says the IMS
+ *   provider is MediaTek's. It was guessing while the answer was available.
  *
- * - Telephony. A phone that cannot dial emergency services is not a risk you
- *   get to accept on someone else's behalf, and you cannot fix it by calling
- *   for help.
- * - SystemUI, launcher, Settings, the package installer, the permission
- *   controller. Turn these off and there is no screen left to turn them back on
- *   with.
- * - Bootloop-class framework modules. The undo is a factory reset.
+ * What names the critical packages now is [CriticalRoles], which asks the
+ * phone: `ROLE`-equivalent holders for the dialer and messages, the
+ * `CATEGORY_HOME` resolver, the framework's own SystemUI component, and the
+ * services registered for `android.telephony.ims.ImsService`. In front of
+ * those stands a ceremony rather than a wall - `policy/PackageStanding.kt`.
  *
- * **2. It is a life-safety system.** Emergency calling, and cell broadcast -
- * the channel that carries evacuation orders and earthquake warnings. Android
- * already lets people switch off alert *categories* in Settings, reversibly and
- * discoverably. Deleting the receiver is not that, and the downside is missing
- * an evacuation order. That is not a trade we offer on someone's behalf.
+ * ## What is still refused
  *
- * Everything else is the user's call. This file used to refuse messaging,
- * Wi-Fi and security components too - that was paternalism dressed as safety.
- * They are reversible, so [cautionFor] warns and the user decides.
+ * **One thing, and on technical grounds rather than moral ones.** Bulwark
+ * cannot remove Bulwark: the process is killed part-way through the action,
+ * and it takes the log that reverses it. An action that cannot be completed or
+ * undone is not offered. Everything else on the phone belongs to its owner.
  *
- * **Bulwark exists because Android decides for people. Copying that habit
- * while claiming to fight it would be the worst possible outcome.**
- *
- * ## Why the fragment list needs [isSystem]
- *
- * Substring matching exists to catch *OEM-renamed system components*, which is
- * a system-package problem and only that. Applied to everything it silently
- * became the paternalism this file had just removed: `com.teslacoilsw.launcher`
- * (Nova) matched "launcher", `com.radio.fmradio` matched "radio",
- * `com.simplenote.android` matched "sim", `com.claims.app` matched "ims".
- * Eight of twenty-five realistic third-party names came back LOCKED - each one
- * an app its owner chose to install, refused with "permanent never-remove
- * list".
- *
- * So the fragment list applies to **system packages only**. [PROTECTED_EXACT]
- * stays unconditional, because exact names cannot collide and two of its
- * entries (Shizuku, Bulwark) are user-installed by definition.
- *
- * This did not need new judgement to catch - the rule was already written. It
- * needed a test that fed it names nobody had thought about. See
- * [FRAGMENT_FALSE_FRIENDS] for the collisions that survive even inside the
- * system partition.
+ * Shizuku is deliberately *not* refused any more. Removing it strands Bulwark
+ * without privilege, but that is recoverable - reinstall it and pair again -
+ * and `safety-rules.md` gave up refusing recoverable things on the user's
+ * behalf.
  *
  * ## Where it is enforced
  *
  * Below the UI and below the policy engine, on the uid-2000 side of the binder
  * (`CommandSafety.requireMutable`). A buggy or compromised layer above cannot
- * route around a check that does not live up there.
- *
- * ## Adding to the hard floor
- *
- * Free, if it genuinely breaks the recovery path. Removing from it needs
- * evidence from real hardware and a note in the device card.
+ * route around a check that does not live up there. That has not changed; only
+ * the size of what it refuses has.
  */
 object ProtectedPackages {
 
     /**
-     * Substrings that mark a package as untouchable wherever they appear.
+     * Bulwark's own package.
      *
-     * Substring matching rather than exact names because OEMs rename things.
-     * On the test device (Lava, MediaTek) the telephony stack does not use
-     * stock AOSP package names, and an exact-match list would silently fail
-     * to protect exactly the device the project was built around.
+     * Exact, and the only entry. An exact name cannot collide, which is the
+     * whole reason the fragment matching that used to live here had to go.
      */
-    private val PROTECTED_FRAGMENTS = listOf(
-        // Telephony and calling. Breaking IMS can break emergency calls, and
-        // there is no undo you can reach while unable to phone anyone.
-        "telephony", "telecom", "ims", "carrier", "dialer", "phone",
-        "emergency", "sim", "euicc", "radio", "modem", "volte", "rcs",
-
-        // The recovery path itself. Disable SystemUI or the launcher and you
-        // cannot reach Settings to put it back.
-        "systemui", "launcher", "settings", "packageinstaller",
-        "permissioncontroller", "provision", "setupwizard", "keyguard",
-
-        // Core framework surfaces.
-        "com.android.systemui", "android.system", "com.android.providers",
-
-        // Added 2026-09-10 after cross-referencing the Universal Debloater
-        // Alliance database against the test device. Our category list caught
-        // telephony perfectly and knew nothing about these - every one is
-        // marked Unsafe upstream, several with "bootloop" in the description.
-        //
-        // These are structural categories, not a list of specific packages.
-        // Per-package knowledge belongs in the bundled UAD data, not here;
-        // this file is only for classes of thing that are dangerous by shape.
-        "networkstack",      // network stack module
-        "modulemetadata",    // "extremely large chance of bootlooping"
-        "ext.shared",        // Android shared library
-        "ext.services",      // default text classifier and friends
-        "devicelock",        // device lock controller
-        "frameworkres",      // framework resource overlays
-        "wifi.resources",    // Wi-Fi module resources
-        "connectivity.resources",
-    )
+    private const val SELF = "com.bulwark.app"
 
     /**
-     * Exact package names that must never be touched even though their names
-     * contain no protected fragment.
-     */
-    private val PROTECTED_EXACT = setOf(
-        "android",
-        "com.android.shell",
-        "com.android.systemui",
-        "com.android.settings",
-        "com.android.providers.settings",
-        "com.android.providers.telephony",
-        "com.android.providers.contacts",
-        "com.android.server.telecom",
-        "com.android.phone",
-        "com.android.emergency",
-        // Emergency broadcast alerts - evacuation orders, earthquake warnings.
-        // Life safety, not convenience. Alert categories remain switchable in
-        // Settings; that is the reversible control, and this is not it.
-        "com.android.cellbroadcastreceiver",
-        "com.google.android.cellbroadcastreceiver",
-        "com.android.permissioncontroller",
-        "com.android.packageinstaller",
-        "com.google.android.permissioncontroller",
-        "com.google.android.ext.services",
-        // The bare MediaTek core package - "core system services and drivers
-        // for MediaTek-powered devices". Exact match on purpose: "mediatek" as
-        // a fragment would protect every MediaTek package, including the many
-        // that are safely removable, and an over-broad rule that defeats the
-        // feature is its own kind of failure.
-        "com.mediatek",
-        // Shizuku itself. Removing our own privilege source mid-operation
-        // would strand the user with no way to undo what we just did.
-        "moe.shizuku.privileged.api",
-        // Bulwark. An app that can uninstall itself can destroy its own
-        // undo log, which is the thing that makes every action reversible.
-        "com.bulwark.app",
-    )
-
-    /**
-     * Serious consequences, but recoverable - so **offered with a warning
-     * rather than refused**.
+     * Substrings that mark a package as worth a warning.
      *
-     * Losing your messaging app is bad. It is not the same kind of bad as a
-     * phone that cannot dial emergency services or reach its own Settings, and
-     * treating them identically was paternalism dressed as safety. The user
-     * owns the device; our job is to make sure they know what they are
-     * choosing, not to choose for them.
+     * **Warnings, never refusals.** Losing your messaging app is bad. It is
+     * not the same kind of bad as a phone that cannot dial, and treating them
+     * identically was paternalism dressed as safety. The user owns the device;
+     * our job is to make sure they know what they are choosing.
      */
     private val CAUTION_FRAGMENTS = listOf(
-        // Carries 2FA codes. The emergency-broadcast receivers themselves are
-        // on the hard floor above; ordinary messaging is not.
+        // Carries 2FA codes.
         "sms", "mms", "messaging",
         // Security and identity components.
         "keychain", "certinstaller", "credential", "biometric", "fingerprint",
@@ -163,46 +72,19 @@ object ProtectedPackages {
     )
 
     /**
-     * Substrings that look like a protected fragment but are not.
+     * Whether Bulwark refuses to touch this at all.
      *
-     * These are removed from the name before fragment matching. Every one is a
-     * real collision, not a hypothetical:
-     *
-     * - **fmradio** contains "radio". FM radio apps are common preinstalled
-     *   OEM bloat and have nothing to do with the cellular radio.
-     * - **simple** contains "sim". A preinstalled `com.oem.simplenote` is not
-     *   part of the SIM stack.
-     *
-     * Substring matching has collisions; that is the price of catching OEM
-     * renames, and the honest response is to record each one as it is found
-     * rather than pretend the rule is exact.
+     * [isSystem] is kept in the signature though it no longer changes the
+     * answer: every caller passes it, and the reading it comes from is a
+     * privileged call worth keeping at the call sites for when this needs it
+     * again. Lowercased and trimmed, because an OEM using mixed case must not
+     * slip through - the one piece of the old matching worth keeping.
      */
-    private val FRAGMENT_FALSE_FRIENDS = listOf("fmradio", "simple")
-
-    /**
-     * True when [packageName] must never be disabled or uninstalled.
-     *
-     * @param isSystem whether this is a system package (or an updated system
-     *   app). **Must come from a privileged query, never from UI state** - it
-     *   decides whether the fragment list applies at all. `PrivilegedPackages`
-     *   reads it from `ApplicationInfo.flags` at uid 2000.
-     *
-     * There is deliberately no default. A caller that has not established
-     * system-ness has not earned an answer, and a default of `false` would
-     * quietly unlock every OEM-renamed telephony package.
-     *
-     * Case-insensitive, because package names are compared as text here and an
-     * OEM using mixed case must not slip through.
-     */
+    @Suppress("UNUSED_PARAMETER")
     fun isProtected(packageName: String, isSystem: Boolean): Boolean {
         val name = packageName.lowercase().trim()
         if (name.isEmpty()) return true // Cannot reason about it, so refuse.
-        if (name in PROTECTED_EXACT) return true
-        // The fragment list describes shapes of *system* component, and a
-        // package the user installed themselves is never one of those.
-        if (!isSystem) return false
-        val scrubbed = FRAGMENT_FALSE_FRIENDS.fold(name) { acc, s -> acc.replace(s, "") }
-        return PROTECTED_FRAGMENTS.any { scrubbed.contains(it) }
+        return name == SELF
     }
 
     /**
@@ -237,31 +119,15 @@ object ProtectedPackages {
     }
 
     /**
-     * Why an outright refusal happened. A user told "no" deserves to be told
-     * why, or they will go looking for a tool that just says yes.
+     * Why the one refusal happened.
+     *
+     * A user told "no" deserves to be told why, or they will go looking for a
+     * tool that just says yes.
      */
     fun reasonFor(packageName: String, isSystem: Boolean): String? {
         if (!isProtected(packageName, isSystem)) return null
-        val name = packageName.lowercase()
-        return when {
-            listOf("telephony", "telecom", "ims", "carrier", "dialer", "phone",
-                "emergency", "sim", "euicc", "radio", "modem", "volte", "rcs")
-                .any { name.contains(it) } ->
-                "Part of the calling system. Removing it can stop the phone " +
-                    "making calls, including emergency calls."
-
-            listOf("systemui", "launcher", "settings", "keyguard", "setupwizard",
-                "provision", "packageinstaller").any { name.contains(it) } ->
-                "Required to operate the phone. Removing it can leave the " +
-                    "device unusable with no way back except a factory reset."
-
-            name.contains("permissioncontroller") ->
-                "Controls app permissions. Removing it takes away the screen " +
-                    "you would use to undo anything else."
-
-            else ->
-                "On Bulwark's permanent never-remove list. If you believe this " +
-                    "is wrong, it needs verifying on a test device first."
-        }
+        return "This is Bulwark. It cannot remove itself - the action would be " +
+            "killed part-way through, and it would destroy the record that " +
+            "undoes everything else."
     }
 }

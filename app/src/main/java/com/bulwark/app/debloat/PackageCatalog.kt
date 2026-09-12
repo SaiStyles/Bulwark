@@ -108,7 +108,12 @@ class PackageCatalog(private val database: UadDatabase) {
         // Uninstall is the escalation: only where the package is documented and
         // rated safe enough. Everything else that is allowed at all can be
         // disabled, which is reversible with `pm enable` and keeps app data.
-        val canUninstall = rating == RemovalRating.RECOMMENDED || rating == RemovalRating.ADVANCED
+        // Everything not refused, from 2026-09-12. The rating used to gate
+        // this - Recommended and Advanced only - and that gate went with the
+        // badges: it was a stranger's verdict deciding what the owner of the
+        // phone was allowed to want. What stands in front of the critical
+        // ones now is the ceremony, not a refusal.
+        val canUninstall = true
 
         val warning = when {
             caution != null -> caution

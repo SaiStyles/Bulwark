@@ -40,7 +40,12 @@ class FirewallActionsTest {
     private fun actions(
         log: FakeLog = FakeLog(),
         system: Set<String> = emptySet(),
-    ) = FirewallActions(ActionJournal(log)) { it in system } to log
+        carriesCalls: Set<String> = emptySet(),
+    ) = FirewallActions(
+        ActionJournal(log),
+        { it in system },
+        { it in carriesCalls },
+    ) to log
 
     @Test
     fun `blocking records the intent and shows up in the rules`() {
@@ -89,7 +94,15 @@ class FirewallActionsTest {
         // Reads like over-caution for a firewall until you notice that cutting
         // the IMS stack off the network can take voice calling with it -
         // including the emergency call safety-rules.md will not trade away.
-        val (act, log) = actions(system = setOf("com.android.phone"))
+        //
+        // This used to come from the never-remove list. When that was retired
+        // on 2026-09-12 the protection went with it by accident, and blocking
+        // has no ceremony in front of it - one tap from no emergency calling.
+        // It now comes from what the phone says carries calls.
+        val (act, log) = actions(
+            system = setOf("com.android.phone"),
+            carriesCalls = setOf("com.android.phone"),
+        )
 
         val failure = runCatching { act.block("com.android.phone") }.exceptionOrNull()
 
@@ -129,7 +142,7 @@ class FirewallActionsTest {
         // nobody can vouch for.
         val log = FakeLog()
         log.append(NewEntry("com.example.app", ActionKind.BLOCK_NETWORK, Phase.ATTEMPTED, 0))
-        val act = FirewallActions(ActionJournal(log)) { false }
+        val act = FirewallActions(ActionJournal(log), { false }, { false })
 
         assertTrue(act.blocked().isEmpty())
     }
@@ -140,7 +153,7 @@ class FirewallActionsTest {
         val log = FakeLog()
         val id = log.append(NewEntry("com.example.app", ActionKind.DISABLE, Phase.ATTEMPTED, 0))
         log.append(NewEntry("com.example.app", ActionKind.DISABLE, Phase.SUCCEEDED, 0, attemptId = id))
-        val act = FirewallActions(ActionJournal(log)) { false }
+        val act = FirewallActions(ActionJournal(log), { false }, { false })
 
         assertTrue(act.blocked().isEmpty())
     }
