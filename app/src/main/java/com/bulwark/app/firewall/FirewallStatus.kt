@@ -14,6 +14,16 @@ package com.bulwark.app.firewall
  * Every state below is derived from a fresh reading of the platform, never from
  * what Bulwark last asked for.
  */
+/**
+ * What Bulwark knows about Android's always-on VPN setting.
+ *
+ * Three values because [CANNOT_TELL] is a real, common answer and not a
+ * synonym for [OFF]. On Android 12 and later `always_on_vpn_app` is `@hide`
+ * and unreadable by ordinary apps, so it is the *only* answer we get there -
+ * measured on hardware 2026-09-12, not inferred.
+ */
+enum class AlwaysOn { ON, OFF, CANNOT_TELL }
+
 enum class FirewallState {
     /** No rules. Nothing to enforce and nothing to claim. */
     NOTHING_BLOCKED,
@@ -84,7 +94,7 @@ fun firewallHeadline(state: FirewallState, ruleCount: Int): String {
  */
 fun firewallDetail(
     state: FirewallState,
-    alwaysOn: Boolean,
+    alwaysOn: AlwaysOn,
     lockdown: Boolean,
 ): String? {
     // Before anything else, in every state, because it is the one setting that
@@ -104,14 +114,29 @@ fun firewallDetail(
                 "stops the tunnel. These apps can reach the internet until it is " +
                 "running again."
 
-        FirewallState.IN_FORCE -> if (alwaysOn) {
-            "Android starts the tunnel by itself, so these stay blocked across " +
-                "restarts too."
-        } else {
-            "This stops them sending. It does not stop them collecting, and it " +
-                "lapses at every restart until Bulwark runs again. Always-on VPN " +
-                "in Settings closes that gap - but leave Block connections " +
-                "without VPN switched OFF."
+        FirewallState.IN_FORCE -> when (alwaysOn) {
+            AlwaysOn.ON ->
+                "Android starts the tunnel by itself, so these stay blocked " +
+                    "across restarts too."
+
+            AlwaysOn.OFF ->
+                "This stops them sending. It does not stop them collecting, and " +
+                    "it lapses at every restart until Bulwark runs again. " +
+                    "Always-on VPN in Settings closes that gap - but leave Block " +
+                    "connections without VPN switched OFF."
+
+            // The usual answer on Android 12+, where the setting is unreadable.
+            // It must not be dressed up as "off": someone who already closed
+            // the gap would be told their protection lapses, on the one card
+            // that has to be trusted. Say what is true - the gap is open unless
+            // they have done something Bulwark is not allowed to check.
+            AlwaysOn.CANNOT_TELL ->
+                "This stops them sending. It does not stop them collecting. " +
+                    "Unless you have turned on Always-on VPN, it also lapses at " +
+                    "every restart until Bulwark runs again - and Android does " +
+                    "not let Bulwark check that setting, so this says the same " +
+                    "thing either way. Leave Block connections without VPN " +
+                    "switched OFF."
         }
     }
 }

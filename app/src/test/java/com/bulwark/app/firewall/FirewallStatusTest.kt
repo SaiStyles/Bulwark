@@ -53,7 +53,7 @@ class FirewallStatusTest {
     fun `a lapsed firewall is never softened into a pause`() {
         // "Paused" would let someone close the app believing they were
         // covered. The word has to carry the fact.
-        val detail = firewallDetail(FirewallState.NOT_IN_FORCE, alwaysOn = false, lockdown = false)!!
+        val detail = firewallDetail(FirewallState.NOT_IN_FORCE, alwaysOn = AlwaysOn.OFF, lockdown = false)!!
         listOf("paused", "temporarily", "will resume").forEach {
             assertTrue("must not soften with \"$it\": $detail", !detail.contains(it, true))
         }
@@ -81,7 +81,7 @@ class FirewallStatusTest {
         // Warning only once it has lapsed is telling someone after it
         // mattered. The reboot gap and "stops sending, not collecting" are
         // attached to the state where things are going well.
-        val detail = firewallDetail(FirewallState.IN_FORCE, alwaysOn = false, lockdown = false)!!
+        val detail = firewallDetail(FirewallState.IN_FORCE, alwaysOn = AlwaysOn.OFF, lockdown = false)!!
         assertTrue("must say it does not stop collection: $detail",
             detail.contains("collecting"))
         assertTrue("must say it lapses at restart: $detail",
@@ -92,21 +92,21 @@ class FirewallStatusTest {
 
     @Test
     fun `with always-on it stops promising a gap it no longer has`() {
-        val detail = firewallDetail(FirewallState.IN_FORCE, alwaysOn = true, lockdown = false)!!
+        val detail = firewallDetail(FirewallState.IN_FORCE, alwaysOn = AlwaysOn.ON, lockdown = false)!!
         assertTrue(detail.contains("across restarts"))
         assertTrue("no stale warning: $detail", !detail.contains("closes that gap"))
     }
 
     @Test
     fun `nothing blocked needs no explanation`() {
-        assertNull(firewallDetail(FirewallState.NOTHING_BLOCKED, alwaysOn = false, lockdown = false))
+        assertNull(firewallDetail(FirewallState.NOTHING_BLOCKED, alwaysOn = AlwaysOn.OFF, lockdown = false))
     }
 
     @Test
     fun `every state that matters explains itself`() {
         FirewallState.entries
             .filter { it != FirewallState.NOTHING_BLOCKED }
-            .forEach { assertNotNull("${it.name} must say something", firewallDetail(it, alwaysOn = false, lockdown = false)) }
+            .forEach { assertNotNull("${it.name} must say something", firewallDetail(it, alwaysOn = AlwaysOn.OFF, lockdown = false)) }
     }
 
     @Test
@@ -121,11 +121,50 @@ class FirewallStatusTest {
         // imply otherwise are the reason layer 1 exists for apps you distrust.
         val overclaims = listOf("safe", "secure", "protected", "isolated", "cannot access")
         FirewallState.entries.forEach { state ->
-            val text = firewallHeadline(state, 2) + " " + firewallDetail(state, alwaysOn = false, lockdown = false).orEmpty()
+            val text = firewallHeadline(state, 2) + " " + firewallDetail(state, alwaysOn = AlwaysOn.OFF, lockdown = false).orEmpty()
             overclaims.forEach {
                 assertTrue("${state.name} must not claim \"$it\": $text",
                     !text.contains(it, ignoreCase = true))
             }
+        }
+    }
+
+    @Test
+    fun `cannot-tell is never dressed up as off`() {
+        // Measured on hardware 2026-09-12: on Android 12+ `always_on_vpn_app`
+        // is @hide and unreadable, so CANNOT_TELL is the only answer we get
+        // there. Collapsing it into OFF told anyone who HAD closed the reboot
+        // gap that their protection lapsed anyway.
+        val cannot = firewallDetail(FirewallState.IN_FORCE, AlwaysOn.CANNOT_TELL, false)!!
+        val off = firewallDetail(FirewallState.IN_FORCE, AlwaysOn.OFF, false)!!
+        assertTrue("the two must not read identically", cannot != off)
+
+        assertTrue(
+            "must say Bulwark cannot check it: $cannot",
+            cannot.contains("does not let Bulwark check"),
+        )
+        assertTrue(
+            "must make the lapse conditional, not flat: $cannot",
+            cannot.contains("Unless you have turned on Always-on VPN"),
+        )
+    }
+
+    @Test
+    fun `cannot-tell still carries the lockdown instruction`() {
+        // The one piece of advice that exists because Bulwark broke a phone.
+        // It must not fall out of the branch people actually see.
+        val cannot = firewallDetail(FirewallState.IN_FORCE, AlwaysOn.CANNOT_TELL, false)!!
+        assertTrue(cannot.contains("Block connections without VPN"))
+        assertTrue(cannot.contains("OFF"))
+    }
+
+    @Test
+    fun `every always-on answer explains itself in the working state`() {
+        AlwaysOn.entries.forEach {
+            assertNotNull(
+                "${it.name} must say something",
+                firewallDetail(FirewallState.IN_FORCE, it, lockdown = false),
+            )
         }
     }
 
@@ -137,7 +176,7 @@ class FirewallStatusTest {
         // carries only the blocked ones - so the blocked app was blocked and
         // every other app on the device lost the network.
         FirewallState.entries.forEach { state ->
-            val detail = firewallDetail(state, alwaysOn = false, lockdown = true)
+            val detail = firewallDetail(state, alwaysOn = AlwaysOn.OFF, lockdown = true)
             assertEquals(
                 "${state.name} must warn about lockdown before anything else",
                 LOCKDOWN_WARNING, detail,
@@ -158,7 +197,7 @@ class FirewallStatusTest {
     fun `nothing recommends lockdown in any state`() {
         // The bug was advice, not code: the app told someone to switch this on.
         FirewallState.entries.forEach { state ->
-            listOf(false, true).forEach { alwaysOn ->
+            AlwaysOn.entries.forEach { alwaysOn ->
                 val text = firewallDetail(state, alwaysOn, lockdown = false).orEmpty()
                 assertTrue(
                     "${state.name} must not recommend lockdown: $text",

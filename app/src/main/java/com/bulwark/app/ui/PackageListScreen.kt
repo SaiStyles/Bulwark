@@ -60,6 +60,7 @@ import com.bulwark.app.permissions.RatFinding
 import com.bulwark.app.permissions.ratFindings
 import com.bulwark.app.firewall.Firewall
 import com.bulwark.app.firewall.FirewallState
+import com.bulwark.app.firewall.AlwaysOn
 import com.bulwark.app.firewall.firewallDetail
 import com.bulwark.app.firewall.firewallHeadline
 import com.bulwark.app.firewall.firewallState
@@ -132,7 +133,7 @@ fun PackageListScreen(
     var blockedApps by remember { mutableStateOf<Set<String>>(emptySet()) }
     var firewallConsentNeeded by remember { mutableStateOf(false) }
     var aVpnIsUp by remember { mutableStateOf(false) }
-    var alwaysOn by remember { mutableStateOf(false) }
+    var alwaysOn by remember { mutableStateOf(AlwaysOn.CANNOT_TELL) }
     var lockdown by remember { mutableStateOf(false) }
     // Null means "could not tell", never "none" - see originLabelFor.
     var systemPackages by remember { mutableStateOf<Set<String>?>(null) }
@@ -269,7 +270,7 @@ fun PackageListScreen(
         }
         blockedApps = rules
         firewallConsentNeeded = Firewall.needsConsent(context)
-        alwaysOn = Firewall.alwaysOnHoldsOurTunnel(context)
+        alwaysOn = Firewall.alwaysOnState(context)
         lockdown = Firewall.lockdownIsOn(context)
         aVpnIsUp = Firewall.ourTunnelIsUp()
 
@@ -575,7 +576,7 @@ private fun FirewallCard(
     ruleCount: Int,
     consentNeeded: Boolean,
     vpnUp: Boolean,
-    alwaysOn: Boolean,
+    alwaysOn: AlwaysOn,
     lockdown: Boolean,
     onOpenVpnSettings: () -> Unit,
     onAllow: () -> Unit,
@@ -621,7 +622,7 @@ private fun FirewallCard(
                     }
                 state == FirewallState.NEEDS_CONSENT ->
                     TextButton(onClick = onAllow) { Text("Allow Bulwark to run it") }
-                state != FirewallState.NOTHING_BLOCKED && !alwaysOn ->
+                state != FirewallState.NOTHING_BLOCKED && alwaysOn != AlwaysOn.ON ->
                     TextButton(onClick = onOpenVpnSettings) { Text("Open VPN settings") }
             }
         }

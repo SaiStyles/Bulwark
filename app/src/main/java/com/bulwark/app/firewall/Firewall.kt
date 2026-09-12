@@ -69,27 +69,40 @@ object Firewall {
      * Whether Android has been told to keep Bulwark's tunnel up by itself.
      *
      * This is the only thing that closes the reboot gap: with it on, the system
-     * starts the tunnel at boot before apps get network, and with lockdown it
-     * denies traffic until the tunnel is up. It persists until someone changes
-     * it - set it once and it holds.
+     * starts the tunnel at boot before apps get network. It persists until
+     * someone changes it - set it once and it holds.
      *
      * **Bulwark cannot set it**, and Android is right to refuse: an app able to
      * make itself always-on with lockdown could hold a phone's network hostage.
      * It is a Settings toggle, which is why [vpnSettings] exists.
      *
-     * ## False can mean "off" or "could not tell", and both are treated as off
+     * ## Three answers, not two - measured on hardware 2026-09-12
      *
-     * These keys are not public API, so a read can fail or come back empty on a
-     * build that stores them elsewhere. Treating that as "off" is the honest
-     * direction: Bulwark then keeps warning about a gap that may already be
-     * closed, which is a wasted sentence. Treating it as "on" would silence a
-     * warning about a gap that is real, which is the failure this layer exists
-     * to avoid.
+     * This returned a `Boolean` until it was tested on a real phone with the
+     * setting deliberately set to our own package. It still said no. The cause
+     * was not our code:
+     *
+     *     SecurityException: Settings key <always_on_vpn_app> is not readable.
+     *     From S+, settings keys annotated with @hide are restricted to
+     *     system_server and system apps only, unless annotated with @Readable.
+     *
+     * So on **Android 12 and later this is unknowable to us**, and collapsing
+     * that into `false` told anyone who *had* closed the reboot gap that their
+     * protection lapsed anyway - on the one card that has to be trusted.
+     * "Off" and "could not tell" are different facts and the screen has to say
+     * which one it has.
+     *
+     * Below API 31 the read works, so [AlwaysOn.ON] and [AlwaysOn.OFF] are
+     * reachable there and this is not dead code - it degrades by version.
+     *
+     * Note `always_on_vpn_lockdown` is **not** restricted the same way and
+     * reads fine, verified in the same session. The lockdown warning still
+     * works, which matters more than this does.
      */
-    fun alwaysOnHoldsOurTunnel(context: Context): Boolean = runCatching {
-        android.provider.Settings.Secure.getString(context.contentResolver, ALWAYS_ON_APP) ==
-            context.packageName
-    }.getOrDefault(false)
+    fun alwaysOnState(context: Context): AlwaysOn = runCatching {
+        val raw = android.provider.Settings.Secure.getString(context.contentResolver, ALWAYS_ON_APP)
+        if (raw == context.packageName) AlwaysOn.ON else AlwaysOn.OFF
+    }.getOrElse { AlwaysOn.CANNOT_TELL }
 
     /**
      * Whether "Block connections without VPN" is on. **A warning, not a goal.**
