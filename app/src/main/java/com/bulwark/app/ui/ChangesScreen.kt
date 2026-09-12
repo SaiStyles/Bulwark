@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import com.bulwark.app.permissions.wordsFor
 import com.bulwark.app.ui.theme.CautionText
 import com.bulwark.app.policy.Change
+import com.bulwark.app.policy.Reconciliation
 import com.bulwark.app.policy.ChangeKind
 import com.bulwark.app.policy.changesHeadline
 import com.bulwark.app.policy.describe
@@ -56,15 +57,19 @@ fun ChangesScreen(
     reloadKey: Int,
     modifier: Modifier = Modifier,
 ) {
-    var changes by remember { mutableStateOf<List<Change>?>(null) }
+    var reconciled by remember { mutableStateOf<Reconciliation?>(null) }
 
     LaunchedEffect(reloadKey) {
-        changes = withContext(Dispatchers.IO) {
-            runCatching { runner.changes() }.getOrDefault(emptyList())
+        reconciled = withContext(Dispatchers.IO) {
+            // Null on failure, never an empty list. "We could not read the
+            // phone" and "the phone has nothing on it" are different facts and
+            // only one of them is safe to render as reassurance.
+            runCatching { runner.changes() }.getOrNull()
         }
     }
 
-    val list = changes
+    val result = reconciled
+    val list = result?.changes
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
@@ -73,7 +78,7 @@ fun ChangesScreen(
         item(key = "headline") {
             Text(
                 text = when {
-                    list == null -> "Reading what Bulwark has changed…"
+                    list == null -> "Reading what has changed on this phone…"
                     else -> changesHeadline(list)
                 },
                 style = MaterialTheme.typography.titleMedium,
@@ -81,12 +86,48 @@ fun ChangesScreen(
             )
         }
 
+        // Said whenever the phone itself could not be read. Without it this
+        // screen presents the log as the state of the device, which is exactly
+        // the claim the log cannot support on its own.
+        if (result?.deviceUnknown == true) {
+            item(key = "device-unknown") {
+                Text(
+                    "Bulwark could not read this phone's current state, so this " +
+                        "is its own record and may be out of date. Anything " +
+                        "switched off outside Bulwark is not listed.",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+            }
+        }
+
+        // Not an error. Something was put back by another route, and the row
+        // for it is gone rather than left offering an undo that would switch
+        // a working app off again.
+        if (result != null && result.alreadyBack > 0) {
+            item(key = "already-back") {
+                Text(
+                    if (result.alreadyBack == 1) {
+                        "1 app Bulwark switched off is already back on, so it is " +
+                            "not listed here."
+                    } else {
+                        "${result.alreadyBack} apps Bulwark switched off are " +
+                            "already back on, so they are not listed here."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+            }
+        }
+
         if (list != null && list.isEmpty()) {
             item(key = "empty") {
                 Text(
-                    "Anything you change will be listed here, with its own undo. " +
-                        "This is the record of what Bulwark did, not of what is " +
-                        "wrong with your phone.",
+                    "Nothing on this phone is switched off, and Bulwark has no " +
+                        "record of changing anything. Anything you change will " +
+                        "be listed here, with its own undo. This is the record " +
+                        "of what was changed, not of what is wrong with your " +
+                        "phone.",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }

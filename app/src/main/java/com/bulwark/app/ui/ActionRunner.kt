@@ -6,6 +6,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
 import com.bulwark.app.policy.Change
 import com.bulwark.app.policy.currentChanges
+import com.bulwark.app.policy.DeviceDisabledReader
+import com.bulwark.app.policy.Reconciliation
+import com.bulwark.app.policy.reconciledWith
 import com.bulwark.app.policy.ActionJournal
 import com.bulwark.app.policy.PackageActions
 import com.bulwark.app.firewall.Firewall
@@ -65,6 +68,12 @@ class ActionRunner(
      * before it can exist at all.
      */
     private val firewall: FirewallActions,
+    /**
+     * Reads back what the phone says is switched off. Defaulted rather than
+     * injected at the call site because there is one production implementation;
+     * the seam that matters for tests is inside the reader itself.
+     */
+    private val deviceDisabled: DeviceDisabledReader = DeviceDisabledReader(),
 ) {
 
     /** How an attempt ended, for the UI to report. */
@@ -246,8 +255,22 @@ class ActionRunner(
         "Gave ${wordsFor(permission).name.lowercase()} back to $packageName."
     }
 
-    /** Everything Bulwark has changed and not put back, newest first. */
-    fun changes(): List<Change> = journal.history().currentChanges()
+    /**
+     * What this phone actually shows changed, reconciled with what Bulwark
+     * recorded.
+     *
+     * **Not the log alone.** The log is app-private and does not survive the
+     * app being removed or its data cleared, which happened on the test device
+     * on 2026-09-12: every record went, the disabled packages stayed, and a
+     * log-derived screen would have said the phone was untouched. It also
+     * cannot see a switch-off undone in Settings, so it can offer to "switch
+     * back on" an app that is already on - the undo that performs a disable
+     * under a non-destructive label.
+     *
+     * Privileged reads, so callers must keep this off the main thread.
+     */
+    fun changes(): Reconciliation =
+        journal.history().currentChanges().reconciledWith(deviceDisabled.read())
 
     /**
      * Authenticates once, then takes one permission away from chosen apps.
