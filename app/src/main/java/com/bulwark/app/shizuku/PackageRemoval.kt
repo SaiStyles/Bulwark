@@ -1,12 +1,18 @@
 package com.bulwark.app.shizuku
 
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.content.pm.VersionedPackage
 import android.os.Build
+import androidx.core.content.ContextCompat
 import rikka.shizuku.ShizukuBinderWrapper
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * `pm uninstall --user 0` and `pm install-existing`, through the binder.
@@ -31,21 +37,41 @@ import rikka.shizuku.ShizukuBinderWrapper
  * than a plumbing one. So the returned binder is unwrapped and re-wrapped
  * here. This is the single most common way this call is got wrong.
  *
- * ## The result is read back, never taken on trust
+ * ## The result channel is listened to *and* the state is read back
  *
- * The platform reports through an `IntentSender`, asynchronously. Rule 6 says
- * confirm the change landed, and a callback that says "success" is still a
- * claim - so [uninstall] re-reads the installed set and fails if the package
- * is still there. The broadcast is required by the signature and is otherwise
- * ignored.
+ * The platform reports asynchronously through an `IntentSender`, and the first
+ * version of this threw that away as "required by the signature and otherwise
+ * ignored". That was the bug. The call returned cleanly, nothing was removed,
+ * and the only symptom was our own read-back failing - twice, on two different
+ * packages, with no way to tell why.
+ *
+ * The reason was in the channel the whole time. So both now happen: wait for
+ * the platform to say what it did, then confirm it against the device. Rule 6
+ * still stands - a callback claiming success is not evidence - but a callback
+ * explaining a *failure* is the only place that explanation exists.
  */
 internal object PackageRemoval {
 
     private const val INSTALLER_INTERFACE = "android.content.pm.IPackageInstaller"
     private const val INSTALLER_STUB = "android.content.pm.IPackageInstaller\$Stub"
 
-    /** Our own no-op result channel. Named so it is obvious in a bug report. */
+    /** Our result channel. Named so it is obvious in a bug report. */
     private const val RESULT_ACTION = "com.bulwark.app.UNINSTALL_RESULT"
+
+    /**
+     * The package the call is *attributed* to, which is not us.
+     *
+     * The binder transaction arrives as uid 2000 because Shizuku forwards it,
+     * so the caller name has to match that uid. Passing our own package made
+     * the platform check **Bulwark's** permissions, and Bulwark does not hold
+     * `DELETE_PACKAGES` - so it answered `STATUS_PENDING_USER_ACTION` on the
+     * result channel, threw nothing, and removed nothing. On 2026-09-12 that
+     * looked exactly like a silent no-op, twice, until the channel was read.
+     */
+    private const val SHELL_PACKAGE = "com.android.shell"
+
+    /** How long to wait for the platform to report. Generous; it is one call. */
+    private const val RESULT_TIMEOUT_MS = 10_000L
 
     /**
      * Removes [packageName] for [userId].
@@ -58,27 +84,42 @@ internal object PackageRemoval {
         context: Context,
         packageName: String,
         userId: Int = 0,
-        callingPackage: String,
+        @Suppress("UNUSED_PARAMETER") callingPackage: String,
     ) {
         val installer = packageInstaller()
         val versioned = VersionedPackage(packageName, PackageManager.VERSION_CODE_HIGHEST)
+        val channel = ResultChannel(context)
 
-        PrivilegedBinder.invokeHidden(
-            Class.forName(INSTALLER_INTERFACE),
-            installer,
-            "uninstall",
-            versioned,
-            callingPackage,
-            0, // flags: remove for this user, nothing exotic
-            resultSender(context),
-            userId,
-        )
+        try {
+            PrivilegedBinder.invokeHidden(
+                Class.forName(INSTALLER_INTERFACE),
+                installer,
+                "uninstall",
+                versioned,
+                // Not our package. See SHELL_PACKAGE: attributing this to
+                // Bulwark makes the platform check Bulwark's permissions.
+                SHELL_PACKAGE,
+                0, // flags: remove for this user, nothing exotic
+                channel.sender,
+                userId,
+            )
 
-        // Read it back. The IntentSender has not necessarily fired yet and its
-        // word would not be evidence anyway.
+            val outcome = channel.await(RESULT_TIMEOUT_MS)
+            if (outcome != null && outcome.status != PackageInstaller.STATUS_SUCCESS) {
+                error(
+                    "The system refused to remove $packageName: " +
+                        "${outcome.describe()}. Nothing was changed.",
+                )
+            }
+        } finally {
+            channel.close()
+        }
+
+        // Then confirm against the device anyway. A report of success is a
+        // claim; this is the evidence.
         if (isInstalledForUser(packageName, userId)) {
             error(
-                "Uninstall of $packageName returned without error and the package " +
+                "Uninstall of $packageName reported no failure and the package " +
                     "is still installed for user $userId",
             )
         }
@@ -165,23 +206,93 @@ internal object PackageRemoval {
         ) ?: error("IPackageInstaller.Stub.asInterface returned null")
     }
 
-    /**
-     * A result channel the platform will accept and we will ignore.
-     *
-     * `FLAG_MUTABLE` because the platform fills the result in. Required from
-     * API 31; harmless before it.
-     */
-    private fun resultSender(context: Context): android.content.IntentSender {
-        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        } else {
-            PendingIntent.FLAG_UPDATE_CURRENT
+    /** What the platform said about one uninstall. */
+    private data class Outcome(val status: Int, val message: String?) {
+        /**
+         * In the user's words where the status has a known meaning, and
+         * verbatim otherwise - an unrecognised code is still better handed
+         * over than swallowed.
+         */
+        fun describe(): String = when (status) {
+            PackageInstaller.STATUS_PENDING_USER_ACTION ->
+                "it asked for confirmation Bulwark cannot give, which usually " +
+                    "means the request was not attributed to a caller allowed " +
+                    "to remove packages"
+            PackageInstaller.STATUS_FAILURE_BLOCKED ->
+                "the system blocked it"
+            PackageInstaller.STATUS_FAILURE_CONFLICT ->
+                "it conflicts with the package already installed"
+            PackageInstaller.STATUS_FAILURE_INCOMPATIBLE ->
+                "the package is not compatible with this device"
+            PackageInstaller.STATUS_FAILURE_INVALID ->
+                "the request was rejected as invalid"
+            PackageInstaller.STATUS_FAILURE_STORAGE ->
+                "there was a storage problem"
+            else -> message?.takeIf { it.isNotBlank() } ?: "status $status"
         }
-        return PendingIntent.getBroadcast(
-            context,
-            0,
-            Intent(RESULT_ACTION).setPackage(context.packageName),
-            flags,
-        ).intentSender
+    }
+
+    /**
+     * The platform's answer, waited for rather than discarded.
+     *
+     * Registered before the call and closed in a `finally`, so a throw cannot
+     * leave a receiver behind. [await] blocks, so this must not be used from
+     * the main thread - which is true of every call in this file.
+     */
+    private class ResultChannel(private val context: Context) {
+        private val latch = CountDownLatch(1)
+        @Volatile private var outcome: Outcome? = null
+
+        private val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                outcome = Outcome(
+                    intent.getIntExtra(
+                        PackageInstaller.EXTRA_STATUS,
+                        PackageInstaller.STATUS_FAILURE,
+                    ),
+                    intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE),
+                )
+                latch.countDown()
+            }
+        }
+
+        init {
+            // Ours alone. Exporting it would let any app forge the answer to
+            // "did that removal work". Through ContextCompat rather than a
+            // version branch: lint caught the pre-33 arm of that branch
+            // missing the flag, which is the fourth real bug it has found
+            // here that reading missed.
+            ContextCompat.registerReceiver(
+                context,
+                receiver,
+                IntentFilter(RESULT_ACTION),
+                ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
+        }
+
+        val sender: android.content.IntentSender
+            get() {
+                // FLAG_MUTABLE because the platform fills the result in.
+                // Required from API 31; harmless before it.
+                val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                } else {
+                    PendingIntent.FLAG_UPDATE_CURRENT
+                }
+                return PendingIntent.getBroadcast(
+                    context,
+                    0,
+                    Intent(RESULT_ACTION).setPackage(context.packageName),
+                    flags,
+                ).intentSender
+            }
+
+        /** Null when nothing arrived in time, which is not the same as success. */
+        fun await(millis: Long): Outcome? =
+            if (latch.await(millis, TimeUnit.MILLISECONDS)) outcome else null
+
+        fun close() {
+            runCatching { context.unregisterReceiver(receiver) }
+        }
     }
 }
