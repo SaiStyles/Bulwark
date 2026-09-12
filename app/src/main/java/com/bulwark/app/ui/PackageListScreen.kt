@@ -108,11 +108,23 @@ import kotlinx.coroutines.withContext
  * does in the community's own words rather than the first line of them, and
  * which parts Bulwark refuses to touch and why.
  */
+/**
+ * The two halves of "Your phone", selected by the navigation bar.
+ *
+ * They are one composable rather than two because all the state and every
+ * effect is shared, and threading fifteen values into two screens is the kind
+ * of change whose failure mode is a card that renders empty rather than an
+ * error. Splitting the code properly is worth doing once Compose tests run
+ * here; splitting what a person *sees* did not have to wait for that.
+ */
+enum class PhoneTab { APPS, AUDIT }
+
 @Composable
 fun PackageListScreen(
     state: ShizukuState,
     runner: ActionRunner,
     snackbar: SnackbarHostState,
+    tab: PhoneTab,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -341,8 +353,19 @@ fun PackageListScreen(
 
     Box(modifier.fillMaxSize()) {
       Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        // Says which of the two this is. "Your phone" was right when there
+        // was one screen; with a tab bar naming three, a heading that repeats
+        // none of them is a heading that tells you nothing.
         Text(
-            "Your phone",
+            when (tab) {
+                PhoneTab.APPS -> "What is on this phone"
+                // Not "what apps can do to you" - the first card already says
+                // that, and the permissions card below says "What apps can
+                // do". Three near-identical phrases on one screen is the
+                // heading telling you nothing. design.md calls this tab's job
+                // "what is true about this phone", so it says that.
+                PhoneTab.AUDIT -> "What is true about this phone"
+            },
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
         )
@@ -353,6 +376,8 @@ fun PackageListScreen(
         // be scrolled, so its own later rows were unreachable. A header that
         // grows with the data is not a header.
         LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+
+            if (tab == PhoneTab.AUDIT) {
 
             // Shown whether or not Shizuku is up. Three of four sources need no
             // privilege, so this is what Bulwark can say on first launch -
@@ -509,6 +534,14 @@ fun PackageListScreen(
                     InterruptedCard(interrupted.map { it.packageName })
                 }
             }
+
+                return@LazyColumn
+            }
+
+            // --- Apps from here. The guards below belong to the package list
+            // and nothing else, which is why the audit is returned above them:
+            // an early return for one section silently swallows every section
+            // under it, and that had already hidden one card once.
 
             if (!ready) {
                 item(key = "no-shizuku") {

@@ -19,6 +19,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import com.bulwark.app.ui.ChangesScreen
+import com.bulwark.app.ui.PhoneTab
 import kotlinx.coroutines.launch
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.collectAsState
@@ -87,7 +88,7 @@ class MainActivity : ComponentActivity() {
                 // have I changed. The second was previously a button at the
                 // bottom of the first, which is how "which apps are blocked?"
                 // became unanswerable.
-                var destination by rememberSaveable { mutableStateOf(Destination.PHONE) }
+                var destination by rememberSaveable { mutableStateOf(Destination.APPS) }
                 var changesReload by rememberSaveable { mutableIntStateOf(0) }
                 // One Scaffold, one snackbar. Both screens report the same way.
                 val snackbar = remember { SnackbarHostState() }
@@ -110,10 +111,15 @@ class MainActivity : ComponentActivity() {
                     },
                 ) { innerPadding ->
                     when (destination) {
-                        Destination.PHONE -> PackageListScreen(
+                        Destination.APPS, Destination.AUDIT -> PackageListScreen(
                             state = state,
                             runner = runner,
                             snackbar = snackbar,
+                            tab = if (destination == Destination.AUDIT) {
+                                PhoneTab.AUDIT
+                            } else {
+                                PhoneTab.APPS
+                            },
                             modifier = Modifier.padding(innerPadding),
                         )
                         Destination.CHANGES -> ChangesScreen(
@@ -165,8 +171,11 @@ class MainActivity : ComponentActivity() {
      * introducing navigation would have made a failure impossible to localise.
      */
     private enum class Destination(val label: String) {
-        /** What is on this phone, and changing it. */
-        PHONE("Your phone"),
+        /** Find an app and change it. */
+        APPS("Apps"),
+
+        /** What is true about this phone: access, permissions, the firewall. */
+        AUDIT("Audit"),
 
         /** What Bulwark changed, and taking it back. */
         CHANGES("Changes"),
