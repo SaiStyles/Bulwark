@@ -112,7 +112,6 @@ import kotlinx.coroutines.withContext
 fun PackageListScreen(
     state: ShizukuState,
     runner: ActionRunner,
-    exporter: LogExporter,
     snackbar: SnackbarHostState,
     modifier: Modifier = Modifier,
 ) {
@@ -191,7 +190,6 @@ fun PackageListScreen(
             (query.isBlank() || e.packageName.contains(query, ignoreCase = true))
     }
     val shownCount = shown.size
-    var exportable by remember { mutableStateOf(false) }
 
     // The special-access audit runs whether or not Shizuku is up: accessibility
     // and device admin need no privilege at all, so the two most dangerous
@@ -238,15 +236,14 @@ fun PackageListScreen(
         ratSignals = built.rat
     }
 
-    // The log is a database. Both of these read it, so both belong here rather
-    // than in the composable body.
+    // The log is a database, so this reads it off the main thread. It used to
+    // fetch "is there anything to export" alongside; that moved to the Changes
+    // screen with the export button, and reading it here was left behind doing
+    // a query on every reload for a value nothing rendered.
     LaunchedEffect(reload) {
-        val log = withContext(Dispatchers.IO) {
-            runCatching { runner.interrupted() }.getOrDefault(emptyList()) to
-                runCatching { exporter.hasAnything() }.getOrDefault(false)
+        interrupted = withContext(Dispatchers.IO) {
+            runCatching { runner.interrupted() }.getOrDefault(emptyList())
         }
-        interrupted = log.first
-        exportable = log.second
     }
 
     LaunchedEffect(ready, reload) {
@@ -540,66 +537,10 @@ fun PackageListScreen(
                 }
             }
 
-            if (exportable) {
-                // The one bulk operation Bulwark has, and only because it is a
-                // restore - see safety-rules.md rule 1, amended 2026-09-11.
-                // Offered next to the export because they answer the same
-                // question: what did this app do to my phone, and can I take
-                // it back?
-                item(key = "restore") {
-                    TextButton(onClick = {
-                        runner.restoreEverything { report(it) }
-                    }) { Text("Put everything back") }
-                }
-            }
-
-            if (exportable) {
-                // Rule 5: the record must be exportable in fact, not only in
-                // principle. Offered once there is something to export.
-                item(key = "export") {
-                    Column {
-                        TextButton(onClick = {
-                            exporter.export { outcome ->
-                                val text = when (outcome) {
-                                    is LogExporter.Outcome.Saved ->
-                                        "Saved to ${outcome.where}."
-                                    is LogExporter.Outcome.Failed ->
-                                        "Could not save. ${outcome.why}"
-                                    LogExporter.Outcome.Cancelled -> null
-                                }
-                                text?.let { t ->
-                                    val bad = outcome is LogExporter.Outcome.Failed
-                                    scope.launch {
-                                        snackbar.showSnackbar(
-                                            message = t,
-                                            withDismissAction = bad,
-                                            duration = if (bad) {
-                                                SnackbarDuration.Indefinite
-                                            } else {
-                                                SnackbarDuration.Long
-                                            },
-                                        )
-                                    }
-                                }
-                            }
-                        }) { Text("Export what Bulwark changed") }
-                        // Warned BEFORE the picker, not after the file exists.
-                        // threat-model.md: for someone who has just switched off
-                        // monitoring software, a file naming it — sitting in
-                        // Downloads on a phone another person can reach — is the
-                        // discovery risk the whole detection section is about.
-                        // A warning after the save has already happened is not a
-                        // warning, it is a receipt.
-                        Text(
-                            "This file lists every app you changed, and it stays " +
-                                "wherever you save it. If someone else can reach " +
-                                "this phone, choose somewhere they cannot.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = CautionText,
-                        )
-                    }
-                }
-            }
+            // "Put everything back" and the export moved to the Changes
+            // screen on 2026-09-12. They belong beside the list of what they
+            // act on: under 371 rows this button asked for a decision without
+            // showing what the decision covered.
 
             summary?.let { s -> item(key = "summary") { SummaryCard(s) } }
 

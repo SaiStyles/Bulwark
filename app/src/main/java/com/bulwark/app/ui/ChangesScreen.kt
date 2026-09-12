@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.bulwark.app.permissions.wordsFor
+import com.bulwark.app.ui.theme.CautionText
 import com.bulwark.app.policy.Change
 import com.bulwark.app.policy.ChangeKind
 import com.bulwark.app.policy.changesHeadline
@@ -109,6 +110,21 @@ fun ChangesScreen(
                     TextButton(onClick = { runner.restoreEverything(onOutcome) }) {
                         Text("Put everything back")
                     }
+                    // Warned BEFORE the picker, not after the file exists.
+                    // threat-model.md: for someone who has just switched off
+                    // monitoring software, a file naming it - sitting in
+                    // Downloads on a phone another person can reach - is the
+                    // discovery risk the whole detection section is about. A
+                    // warning after the save has happened is not a warning, it
+                    // is a receipt. Carried over verbatim when this moved here,
+                    // because the first rewrite of it was weaker and later.
+                    Text(
+                        "This file lists every app you changed, and it stays " +
+                            "wherever you save it. If someone else can reach " +
+                            "this phone, choose somewhere they cannot.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = CautionText,
+                    )
                     TextButton(onClick = {
                         // Translated into the same Outcome the rest of the app
                         // reports through, so there is one way a result reaches
@@ -126,12 +142,6 @@ fun ChangesScreen(
                             }
                         }
                     }) { Text("Export what Bulwark changed") }
-                    Text(
-                        "The export lists every app you changed and stays wherever " +
-                            "you save it. If someone else can reach this phone, " +
-                            "choose somewhere they cannot.",
-                        style = MaterialTheme.typography.labelSmall,
-                    )
                 }
             }
         }

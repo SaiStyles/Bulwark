@@ -113,7 +113,6 @@ class MainActivity : ComponentActivity() {
                         Destination.PHONE -> PackageListScreen(
                             state = state,
                             runner = runner,
-                            exporter = exporter,
                             snackbar = snackbar,
                             modifier = Modifier.padding(innerPadding),
                         )
