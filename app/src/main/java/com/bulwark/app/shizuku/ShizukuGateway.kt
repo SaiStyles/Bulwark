@@ -93,6 +93,45 @@ class ShizukuGateway(@Suppress("unused") private val appContext: Context) {
     /** True only if a privileged call would work *right now*. */
     fun canActNow(): Boolean = isAlive() && hasPermission()
 
+    /**
+     * Stops the Shizuku **server**, at the user's request.
+     *
+     * Not to be confused with [stop], which only detaches this object's
+     * listeners and leaves the server running. This one ends the privileged
+     * session for every app on the phone, which is why nothing calls it except
+     * a person pressing a button that says so.
+     *
+     * **Reversible, and cheaply**: the pairing survives, so starting Shizuku
+     * again is one tap - provided wireless debugging is still on. That proviso
+     * is the whole reason `DoneForNow` states the cost of switching debugging
+     * off separately.
+     *
+     * ## Two things lint is right about, and one it cannot see
+     *
+     * `Shizuku.exit()` is `@RestrictTo(LIBRARY_GROUP_PREFIX)` - public, but the
+     * library says it is for Shizuku's own manager, not for clients. The
+     * suppression is deliberate and the risk is accepted narrowly: a future
+     * Shizuku may remove it, `runCatching` returns false, and the button
+     * reports that nothing changed. Graceful, and honest about it.
+     *
+     * The thing lint cannot see is bigger: **this stops the server for every
+     * app on the phone**, not just Bulwark. Anything else the person uses
+     * Shizuku for loses access too. That is what they asked for when they
+     * pressed a button that says "Stop Shizuku", but it has to be *said* -
+     * `DoneForNow` says it.
+     *
+     * Returns false if there was nothing to stop or the call was refused, and
+     * the caller must re-read state rather than assume either way. `exit()`
+     * returns void, so success here means "the request went out without
+     * throwing", not "the server is gone" - the screen confirms by re-reading,
+     * the same way every other action in this app does.
+     */
+    @android.annotation.SuppressLint("RestrictedApi")
+    fun shutDownServer(): Boolean {
+        if (!canActNow()) return false
+        return runCatching { Shizuku.exit() }.isSuccess
+    }
+
     private fun isAlive(): Boolean = try {
         Shizuku.pingBinder()
     } catch (_: Throwable) {

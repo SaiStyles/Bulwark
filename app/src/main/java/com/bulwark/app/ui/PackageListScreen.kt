@@ -54,6 +54,14 @@ import com.bulwark.app.debloat.RemovalRating
 import com.bulwark.app.debloat.UadDatabase
 import com.bulwark.app.debloat.readableDescription
 import com.bulwark.app.policy.ActionRecord
+import android.content.Intent
+import android.provider.Settings
+import com.bulwark.app.permissions.DeviceSignal
+import com.bulwark.app.shizuku.CloseAction
+import com.bulwark.app.shizuku.Closeable
+import com.bulwark.app.shizuku.ShizukuGateway
+import com.bulwark.app.shizuku.doneForNowHeadline
+import com.bulwark.app.shizuku.whatCanBeClosed
 import com.bulwark.app.permissions.AppAccess
 import com.bulwark.app.permissions.AuditSummary
 import com.bulwark.app.permissions.RatFinding
@@ -106,6 +114,7 @@ fun PackageListScreen(
     state: ShizukuState,
     runner: ActionRunner,
     exporter: LogExporter,
+    gateway: ShizukuGateway,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -120,6 +129,9 @@ fun PackageListScreen(
     var accessSummary by remember { mutableStateOf<AuditSummary?>(null) }
     var accessUnavailable by remember { mutableStateOf<List<String>>(emptyList()) }
     var ratSignals by remember { mutableStateOf<List<RatFinding>>(emptyList()) }
+    // Needs no privilege - Settings.Global, world-readable, which is also
+    // why a rogue app can check it before deciding to use it.
+    var wirelessDebuggingOn by remember { mutableStateOf(false) }
     var reload by remember { mutableIntStateOf(0) }
     // Read off the main thread, below. These were `remember { }` blocks in the
     // composable body, which put two SQLite reads on the main thread on every
@@ -212,6 +224,7 @@ fun PackageListScreen(
                 audited,
                 apps.summarise(),
                 result.unavailable,
+                DeviceSignal.WIRELESS_DEBUGGING_ON in result.signals,
                 ratFindings(
                     result.signals,
                     audited,
@@ -223,6 +236,7 @@ fun PackageListScreen(
         access = built.apps
         accessSummary = built.summary
         accessUnavailable = built.unavailable
+        wirelessDebuggingOn = built.wirelessDebuggingOn
         ratSignals = built.rat
     }
 
@@ -469,6 +483,53 @@ fun PackageListScreen(
                 return@LazyColumn
             }
 
+            // Offered last on purpose: it is what you do when you have
+            // finished, and it is the only place Bulwark undoes its own
+            // footprint rather than the phone's.
+            val closeable = whatCanBeClosed(
+                shizukuRunning = state is ShizukuState.Ready,
+                wirelessDebuggingOn = wirelessDebuggingOn,
+            )
+            if (closeable.isNotEmpty()) {
+                item(key = "done-for-now") {
+                    DoneForNowCard(
+                        closeable = closeable,
+                        onStopShizuku = {
+                            val stopped = gateway.shutDownServer()
+                            gateway.refresh()
+                            report(
+                                if (stopped) {
+                                    ActionRunner.Outcome.Done(
+                                        "Shizuku stopped. Start it again when you " +
+                                            "next want Bulwark.",
+                                    )
+                                } else {
+                                    ActionRunner.Outcome.Failed(
+                                        "Bulwark could not stop Shizuku. Nothing changed.",
+                                    )
+                                },
+                            )
+                        },
+                        onOpenDeveloperOptions = {
+                            runCatching {
+                                context.startActivity(
+                                    Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                )
+                            }.onFailure {
+                                report(
+                                    ActionRunner.Outcome.Failed(
+                                        "Bulwark could not open Developer options on " +
+                                            "this phone. The switch is under Settings, " +
+                                            "Developer options, Wireless debugging.",
+                                    ),
+                                )
+                            }
+                        },
+                    )
+                }
+            }
+
             if (exportable) {
                 // The one bulk operation Bulwark has, and only because it is a
                 // restore - see safety-rules.md rule 1, amended 2026-09-11.
@@ -699,8 +760,49 @@ private data class AuditOutcome(
     val apps: List<AppAccess>,
     val summary: AuditSummary,
     val unavailable: List<String>,
+    val wirelessDebuggingOn: Boolean,
     val rat: List<RatFinding>,
 )
+
+/**
+ * The offer to close the door setting Bulwark up opened.
+ *
+ * Last on the screen deliberately - it is what you do when finished, not
+ * something to trip over on the way in.
+ *
+ * The two actions are drawn the same way on purpose, except for their labels.
+ * One is performed by Bulwark and one is a signpost to a switch only the user
+ * can flip, and the labels are the only honest place to carry that difference:
+ * "Stop Shizuku" versus "Open Developer options". A button that reads like it
+ * did the thing, and did not, is the false sense of protection
+ * `safety-rules.md` calls worse than none.
+ */
+@Composable
+private fun DoneForNowCard(
+    closeable: List<Closeable>,
+    onStopShizuku: () -> Unit,
+    onOpenDeveloperOptions: () -> Unit,
+) {
+    Card(Modifier.padding(top = 16.dp)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            doneForNowHeadline(closeable)?.let {
+                Text(it, style = MaterialTheme.typography.bodyMedium)
+            }
+            closeable.forEach { item ->
+                Text(item.what, style = MaterialTheme.typography.bodySmall)
+                // Never folded away behind a "more" link. The cost is the half
+                // people skip, so it sits in the same block as the button.
+                Text(item.cost, style = MaterialTheme.typography.bodySmall)
+                TextButton(
+                    onClick = when (item.action) {
+                        CloseAction.STOP_SHIZUKU -> onStopShizuku
+                        CloseAction.TURN_OFF_WIRELESS_DEBUGGING -> onOpenDeveloperOptions
+                    },
+                ) { Text(item.label) }
+            }
+        }
+    }
+}
 
 @Composable
 private fun InterruptedCard(packages: List<String>) {
