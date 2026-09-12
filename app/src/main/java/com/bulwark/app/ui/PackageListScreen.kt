@@ -113,6 +113,7 @@ fun PackageListScreen(
     state: ShizukuState,
     runner: ActionRunner,
     exporter: LogExporter,
+    snackbar: SnackbarHostState,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -121,7 +122,6 @@ fun PackageListScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
     var onlyOffered by remember { mutableStateOf(false) }
-    val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var access by remember { mutableStateOf<List<AppAccess>?>(null) }
     var accessSummary by remember { mutableStateOf<AuditSummary?>(null) }
@@ -631,7 +631,6 @@ fun PackageListScreen(
         }
       }
 
-      SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
     }
 }
 

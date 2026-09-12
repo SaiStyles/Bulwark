@@ -4,6 +4,8 @@ import android.app.Activity
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
+import com.bulwark.app.policy.Change
+import com.bulwark.app.policy.currentChanges
 import com.bulwark.app.policy.ActionJournal
 import com.bulwark.app.policy.PackageActions
 import com.bulwark.app.firewall.Firewall
@@ -218,6 +220,34 @@ class ActionRunner(
         permissions.revoke(packageName, permission)
         "Took ${wordsFor(permission).name.lowercase()} away from $packageName."
     }
+
+    /**
+     * Gives one permission back, undoing a single revoke.
+     *
+     * The counterpart to [revokePermission], and until 2026-09-12 the only way
+     * to reverse one was `restoreEverything`, which reverses everything. An
+     * undo you cannot aim is not much of an undo.
+     *
+     * Authenticated like the revoke it reverses. Granting is not destructive,
+     * but it *widens* what an app can do, and the person authorising should be
+     * the person holding the phone - the same reason the revoke asks.
+     */
+    fun giveBackPermission(
+        packageName: String,
+        permission: String,
+        onOutcome: (Outcome) -> Unit,
+    ) = authenticated(
+        title = "Give back ${wordsFor(permission).name}",
+        reason = "Let $packageName use ${wordsFor(permission).name.lowercase()} " +
+            "again, undoing the change Bulwark made.",
+        onOutcome = onOutcome,
+    ) {
+        permissions.grant(packageName, permission)
+        "Gave ${wordsFor(permission).name.lowercase()} back to $packageName."
+    }
+
+    /** Everything Bulwark has changed and not put back, newest first. */
+    fun changes(): List<Change> = journal.history().currentChanges()
 
     /**
      * Authenticates once, then takes one permission away from chosen apps.

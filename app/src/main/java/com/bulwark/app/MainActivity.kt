@@ -6,6 +6,20 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.bulwark.app.ui.ChangesScreen
+import kotlinx.coroutines.launch
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -68,16 +82,95 @@ class MainActivity : ComponentActivity() {
         setContent {
             BulwarkTheme {
                 val state by gateway.state.collectAsState()
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    PackageListScreen(
-                        state = state,
-                        runner = runner,
-                        exporter = exporter,
-                        modifier = Modifier.padding(innerPadding),
-                    )
+                // Two destinations, because they answer different questions -
+                // `_shared/design.md` rule 1. What is on this phone, and what
+                // have I changed. The second was previously a button at the
+                // bottom of the first, which is how "which apps are blocked?"
+                // became unanswerable.
+                var destination by rememberSaveable { mutableStateOf(Destination.PHONE) }
+                var changesReload by rememberSaveable { mutableIntStateOf(0) }
+                // One Scaffold, one snackbar. Both screens report the same way.
+                val snackbar = remember { SnackbarHostState() }
+                val scope = rememberCoroutineScope()
+
+                Scaffold(
+                    modifier = Modifier.fillMaxSize(),
+                    snackbarHost = { SnackbarHost(snackbar) },
+                    bottomBar = {
+                        NavigationBar {
+                            Destination.entries.forEach { item ->
+                                NavigationBarItem(
+                                    selected = destination == item,
+                                    onClick = { destination = item },
+                                    icon = {},
+                                    label = { Text(item.label) },
+                                )
+                            }
+                        }
+                    },
+                ) { innerPadding ->
+                    when (destination) {
+                        Destination.PHONE -> PackageListScreen(
+                            state = state,
+                            runner = runner,
+                            exporter = exporter,
+                            snackbar = snackbar,
+                            modifier = Modifier.padding(innerPadding),
+                        )
+                        Destination.CHANGES -> ChangesScreen(
+                            runner = runner,
+                            exporter = exporter,
+                            // Re-read every time the tab is opened: the list is
+                            // derived from the log, and an action taken on the
+                            // other screen must show here without a restart.
+                            reloadKey = changesReload,
+                            onOutcome = { outcome ->
+                                val text = when (outcome) {
+                                    is ActionRunner.Outcome.Done -> outcome.message
+                                    is ActionRunner.Outcome.Refused -> outcome.why
+                                    is ActionRunner.Outcome.Failed -> outcome.why
+                                    ActionRunner.Outcome.Cancelled -> null
+                                }
+                                if (outcome is ActionRunner.Outcome.Done) changesReload++
+                                text?.let { t ->
+                                    val bad = outcome is ActionRunner.Outcome.Failed ||
+                                        outcome is ActionRunner.Outcome.Refused
+                                    scope.launch {
+                                        snackbar.showSnackbar(
+                                            message = t,
+                                            withDismissAction = bad,
+                                            duration = if (bad) {
+                                                SnackbarDuration.Indefinite
+                                            } else {
+                                                SnackbarDuration.Long
+                                            },
+                                        )
+                                    }
+                                }
+                            },
+                            modifier = Modifier.padding(innerPadding),
+                        )
+                    }
                 }
             }
         }
+    }
+
+    /**
+     * The screens, and the questions they answer.
+     *
+     * Two, not one, because a screen that answers two questions becomes a feed
+     * and a feed has no hierarchy (`_shared/design.md` rule 1). Kept to two
+     * rather than the three that file describes: splitting the phone screen
+     * into Apps and Audit is the next step, and doing it in the same change as
+     * introducing navigation would have made a failure impossible to localise.
+     */
+    private enum class Destination(val label: String) {
+        /** What is on this phone, and changing it. */
+        PHONE("Your phone"),
+
+        /** What Bulwark changed, and taking it back. */
+        CHANGES("Changes"),
     }
 
     /** The running build's version name, or a marker if it cannot be read. */
