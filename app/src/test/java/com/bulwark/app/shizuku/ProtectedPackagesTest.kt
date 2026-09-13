@@ -29,8 +29,11 @@ import org.junit.Test
 class ProtectedPackagesTest {
 
     @Test
-    fun `Bulwark refuses to remove Bulwark, and that is the whole list`() {
+    fun `two refusals, and both are about not being able to undo it`() {
         assertTrue(ProtectedPackages.isProtected("com.bulwark.app", isSystem = false))
+        // Added 2026-09-12 after it happened: disabling Shizuku removes the
+        // privilege needed to re-enable it, and it took a PC to undo.
+        assertTrue(ProtectedPackages.isProtected("moe.shizuku.privileged.api", isSystem = false))
 
         // Everything the old list refused is now the owner's to decide on.
         listOf(
@@ -39,7 +42,6 @@ class ProtectedPackagesTest {
             "com.android.systemui",
             "com.android.settings",
             "com.android.cellbroadcastreceiver",
-            "moe.shizuku.privileged.api",
         ).forEach {
             assertFalse("$it must no longer be refused", ProtectedPackages.isProtected(it, true))
         }
@@ -54,6 +56,14 @@ class ProtectedPackagesTest {
         // action cannot be completed, because it kills the process running it.
         assertTrue(reason!!, reason.contains("cannot remove itself"))
         assertTrue(reason, reason.contains("record that undoes"))
+    }
+
+    @Test
+    fun `the Shizuku refusal names the trap rather than a danger`() {
+        val reason = ProtectedPackages.reasonFor("moe.shizuku.privileged.api", isSystem = false)
+
+        assertNotNull(reason)
+        assertTrue(reason!!, reason.contains("switch it back on"))
     }
 
     @Test

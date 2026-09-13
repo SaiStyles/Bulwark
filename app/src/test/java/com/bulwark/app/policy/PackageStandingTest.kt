@@ -91,6 +91,27 @@ class PackageStandingTest {
     }
 
     @Test
+    fun `Shizuku is refused, because switching it off removes the way back`() {
+        // 2026-09-12: it was allowed, SAI switched it off through Bulwark, and
+        // Bulwark could not switch it back on - re-enabling needs the privilege
+        // that disabling just removed. It took a PC and adb.
+        val s = standingFor(
+            "moe.shizuku.privileged.api",
+            isSystem = false,
+            roles = CriticalRoles.Reading(emptyMap(), emptySet()),
+            selfPackage = "com.bulwark.app",
+        )
+
+        assertTrue(s.refused)
+        assertFalse("a refusal is not a ceremony", s.needsCeremony)
+        assertEquals("SHIZUKU", s.badge())
+        assertTrue(
+            "and it says why: ${s.labels()}",
+            s.labels().single().contains("switch it back on"),
+        )
+    }
+
+    @Test
     fun restorabilityIsStatedOnEveryRowAndSaysWhichWay() {
         val preinstalled = standing().labels().last()
         val userInstalled =

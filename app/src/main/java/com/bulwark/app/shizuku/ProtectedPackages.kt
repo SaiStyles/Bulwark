@@ -27,15 +27,14 @@ package com.bulwark.app.shizuku
  *
  * ## What is still refused
  *
- * **One thing, and on technical grounds rather than moral ones.** Bulwark
- * cannot remove Bulwark: the process is killed part-way through the action,
- * and it takes the log that reverses it. An action that cannot be completed or
- * undone is not offered. Everything else on the phone belongs to its owner.
+ * **Two things, and on technical grounds rather than moral ones.** Bulwark
+ * cannot remove Bulwark: the process is killed part-way through the action and
+ * it takes the log that reverses it. And it cannot disable Shizuku, because
+ * re-enabling needs the privilege that disabling just removed - proven on
+ * 2026-09-12, when it took a PC and `adb` to undo.
  *
- * Shizuku is deliberately *not* refused any more. Removing it strands Bulwark
- * without privilege, but that is recoverable - reinstall it and pair again -
- * and `safety-rules.md` gave up refusing recoverable things on the user's
- * behalf.
+ * The test is not "is this dangerous" but **"can Bulwark undo it"**. Everything
+ * else on the phone belongs to its owner.
  *
  * ## Where it is enforced
  *
@@ -49,10 +48,26 @@ object ProtectedPackages {
     /**
      * Bulwark's own package.
      *
-     * Exact, and the only entry. An exact name cannot collide, which is the
+     * Exact, like the other entry. An exact name cannot collide, which is the
      * whole reason the fragment matching that used to live here had to go.
      */
     private const val SELF = "com.bulwark.app"
+
+    /**
+     * Shizuku, which is where every privileged call comes from.
+     *
+     * **Added 2026-09-12, after it happened.** It was deliberately *not*
+     * refused when the blocklist was cut: disabling it looked recoverable -
+     * reinstall, pair again - and `safety-rules.md` had just given up refusing
+     * recoverable things. Then SAI disabled it through Bulwark, and Bulwark
+     * could not put it back: re-enabling needs the privilege that was just
+     * switched off. Both attempts are in the log as ENABLE / FAILED.
+     *
+     * It took a PC and `adb` to recover, which is the one thing the tin says
+     * you do not need. The action is not reversible **by Bulwark**, and that
+     * is the test - not whether some other tool could fix it.
+     */
+    private const val PRIVILEGE_SOURCE = "moe.shizuku.privileged.api"
 
     /**
      * Substrings that mark a package as worth a warning.
@@ -84,7 +99,7 @@ object ProtectedPackages {
     fun isProtected(packageName: String, isSystem: Boolean): Boolean {
         val name = packageName.lowercase().trim()
         if (name.isEmpty()) return true // Cannot reason about it, so refuse.
-        return name == SELF
+        return name == SELF || name == PRIVILEGE_SOURCE
     }
 
     /**
@@ -119,15 +134,22 @@ object ProtectedPackages {
     }
 
     /**
-     * Why the one refusal happened.
+     * Why a refusal happened.
      *
      * A user told "no" deserves to be told why, or they will go looking for a
      * tool that just says yes.
      */
     fun reasonFor(packageName: String, isSystem: Boolean): String? {
         if (!isProtected(packageName, isSystem)) return null
-        return "This is Bulwark. It cannot remove itself - the action would be " +
-            "killed part-way through, and it would destroy the record that " +
-            "undoes everything else."
+        return if (packageName.lowercase().trim() == PRIVILEGE_SOURCE) {
+            "This is Shizuku, which is where Bulwark's permission to change " +
+                "anything comes from. Switching it off would take away the " +
+                "ability to switch it back on - it needed a computer to undo " +
+                "the one time it happened."
+        } else {
+            "This is Bulwark. It cannot remove itself - the action would be " +
+                "killed part-way through, and it would destroy the record that " +
+                "undoes everything else."
+        }
     }
 }

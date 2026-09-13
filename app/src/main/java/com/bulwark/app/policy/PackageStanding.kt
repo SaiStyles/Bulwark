@@ -41,6 +41,11 @@ data class Standing(
     val restorability: Restorability,
     val checkIncomplete: Boolean = false,
     val isSelf: Boolean = false,
+    /**
+     * Shizuku. Refused for the same reason as [isSelf] and not a moral one:
+     * switching it off removes the privilege needed to switch it back on.
+     */
+    val isPrivilegeSource: Boolean = false,
 ) {
     /** The phone named this package as doing one of its critical jobs. */
     val isCritical: Boolean get() = jobs.isNotEmpty()
@@ -53,7 +58,7 @@ data class Standing(
      * action, and it takes the log that makes the action reversible with it.
      * An action that cannot be completed or undone is not offered.
      */
-    val refused: Boolean get() = isSelf
+    val refused: Boolean get() = isSelf || isPrivilegeSource
 
     /**
      * Warnings, then typing the name, then authentication.
@@ -101,8 +106,15 @@ fun CriticalRoles.Job.sentence(): String = when (this) {
 fun Standing.labels(): List<String> = buildList {
     if (refused) {
         add(
-            "This is Bulwark. It cannot remove itself - doing so would kill the " +
-                "action part-way through and destroy the record that undoes it."
+            if (isPrivilegeSource) {
+                "This is Shizuku, where Bulwark's permission to change anything " +
+                    "comes from. Switching it off would take away the ability to " +
+                    "switch it back on - that took a computer to undo."
+            } else {
+                "This is Bulwark. It cannot remove itself - doing so would kill " +
+                    "the action part-way through and destroy the record that " +
+                    "undoes it."
+            }
         )
         return@buildList
     }
@@ -188,6 +200,7 @@ fun CriticalRoles.Job.badge(): String = when (this) {
  * order [labels] uses, so a row never reorders itself between reads.
  */
 fun Standing.badge(): String? = when {
+    isPrivilegeSource -> "SHIZUKU"
     refused -> "BULWARK"
     else -> CriticalRoles.Job.entries.firstOrNull { it in jobs }?.badge()
 }
@@ -214,4 +227,8 @@ fun standingFor(
     },
     checkIncomplete = roles == null || !roles.complete,
     isSelf = packageName == selfPackage,
+    isPrivilegeSource = packageName == PRIVILEGE_SOURCE,
 )
+
+/** Shizuku's package. One name, exact, so it cannot collide. */
+const val PRIVILEGE_SOURCE = "moe.shizuku.privileged.api"
