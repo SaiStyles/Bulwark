@@ -57,9 +57,14 @@ class PackageStandingTest {
 
         assertFalse("nothing was found, so it is not known to be critical", s.isCritical)
         assertFalse("and an ordinary app must not inherit the ceremony", s.needsCeremony)
+        // And it is no longer said on the row either. One failing read marks
+        // every package, so the line appeared on all 370 - a notice that fires
+        // on everything says nothing, and it had no action attached. The flag
+        // is still held, for a screen-level notice to use.
+        assertTrue(s.checkIncomplete)
         assertTrue(
-            "but it is still said, rather than reading as an all-clear",
-            s.labels().any { it.contains("could not finish checking") },
+            "no per-row noise",
+            s.labels().none { it.contains("could not finish checking") },
         )
     }
 
@@ -117,7 +122,12 @@ class PackageStandingTest {
         val userInstalled =
             standing(restorability = Restorability.GONE_FOR_GOOD).labels().last()
 
-        assertTrue(preinstalled, preinstalled.contains("Bulwark can put this back"))
+        assertTrue(preinstalled, preinstalled.contains("came with the phone"))
+        assertTrue(
+            "an updated system app comes back as the shipped version, and that " +
+                "is not the same app the user had: $preinstalled",
+            preinstalled.contains("update"),
+        )
         assertTrue(userInstalled, userInstalled.contains("cannot put it back"))
     }
 

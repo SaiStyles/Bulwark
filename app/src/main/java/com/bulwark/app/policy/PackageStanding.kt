@@ -121,15 +121,12 @@ fun Standing.labels(): List<String> = buildList {
     // Jobs first and in a fixed order, so the same phone always reads the same
     // way and the loudest thing is the consequence rather than the plumbing.
     CriticalRoles.Job.entries.filter { it in jobs }.forEach { add(it.sentence()) }
-    if (checkIncomplete) {
-        add(
-            "Bulwark could not finish checking what this does on your phone."
-        )
-    }
     add(
         when (restorability) {
             Restorability.BULWARK_CAN_RESTORE ->
-                "Preinstalled. Bulwark can put this back, though its data is lost."
+                "Preinstalled, so Bulwark can reinstall it from the copy that " +
+                    "came with the phone. Its data is gone, and so is any " +
+                    "update it had - what returns is the version it shipped with."
             Restorability.GONE_FOR_GOOD ->
                 "You installed this. Bulwark cannot put it back - you would " +
                     "reinstall it yourself, and its data is gone."
@@ -153,8 +150,8 @@ fun Standing.secondWarning(): String? {
         .joinToString(" ") { it.sentence() }
     val tail = when (restorability) {
         Restorability.BULWARK_CAN_RESTORE ->
-            "Bulwark can put it back, but not the data, and not while the phone " +
-                "is unusable."
+            "Bulwark can reinstall the version that shipped with the phone - not " +
+                "its data, not its updates, and not while the phone is unusable."
         Restorability.GONE_FOR_GOOD ->
             "Bulwark cannot put this one back at all."
     }

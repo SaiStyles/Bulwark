@@ -6,6 +6,8 @@ import android.content.pm.PackageManager
 import android.provider.Settings
 import android.provider.Telephony
 import android.telecom.TelecomManager
+import rikka.shizuku.ShizukuBinderWrapper
+import rikka.shizuku.SystemServiceHelper
 
 /**
  * Which packages hold this phone's critical jobs, asked of the phone.
@@ -106,9 +108,11 @@ object CriticalRoles {
             )
         }
 
-        attempt(Job.DIALER) { dialers(context) }
+        attempt(Job.DIALER) { roleHolders(ROLE_DIALER) ?: dialers(context) }
 
-        attempt(Job.SMS) { listOf(Telephony.Sms.getDefaultSmsPackage(context)) }
+        attempt(Job.SMS) {
+            roleHolders(ROLE_SMS) ?: listOf(Telephony.Sms.getDefaultSmsPackage(context))
+        }
 
         attempt(Job.SETTINGS) {
             listOf(
@@ -148,6 +152,42 @@ object CriticalRoles {
 
         return Reading(found.mapValues { it.value.toSet() }, unreadable)
     }
+
+    private const val ROLE_DIALER = "android.app.role.DIALER"
+    private const val ROLE_SMS = "android.app.role.SMS"
+
+    /**
+     * Role holders, asked of the platform the way `cmd role` asks.
+     *
+     * `RoleManager.getRoleHolders` is `@SystemApi` and needs
+     * `MANAGE_ROLE_HOLDERS`, which we do not hold in-process - so the first
+     * version used the public fallbacks instead. On the Agni 2 that was wrong
+     * for SMS: `sms_default_application` is **null** there, so
+     * `getDefaultSmsPackage` returns nothing and the SMS holder could not be
+     * named at all. `cmd role` had the answer the whole time - `com.jio.myjio`.
+     *
+     * Through Shizuku the call is made as uid 2000, which does hold the
+     * permission. Null when that is unavailable, and the caller falls back to
+     * the public route - so this is better with Shizuku and no worse without.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun roleHolders(role: String): List<String>? = runCatching {
+        val binder = SystemServiceHelper.getSystemService("role") ?: return null
+        val service = PrivilegedBinder.invokeHidden(
+            Class.forName("android.app.role.IRoleManager\$Stub"),
+            null,
+            "asInterface",
+            ShizukuBinderWrapper(binder),
+        ) ?: return null
+        val holders = PrivilegedBinder.invokeHidden(
+            Class.forName("android.app.role.IRoleManager"),
+            service,
+            "getRoleHoldersAsUser",
+            role,
+            0,
+        ) as? List<String>
+        holders?.takeIf { it.isNotEmpty() }
+    }.getOrNull()
 
     /**
      * The dialer, or dialers.
