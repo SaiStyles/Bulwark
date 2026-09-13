@@ -18,8 +18,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
+import com.bulwark.app.ui.AppsScreen
+import com.bulwark.app.ui.AuditScreen
 import com.bulwark.app.ui.ChangesScreen
-import com.bulwark.app.ui.PhoneTab
 import kotlinx.coroutines.launch
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.collectAsState
@@ -38,8 +39,10 @@ import com.bulwark.app.shizuku.PrivilegedPackages
 import com.bulwark.app.shizuku.ShizukuGateway
 import com.bulwark.app.ui.ActionRunner
 import com.bulwark.app.ui.LogExporter
-import com.bulwark.app.ui.PackageListScreen
 import com.bulwark.app.ui.theme.BulwarkTheme
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
@@ -126,6 +129,46 @@ class MainActivity : ComponentActivity() {
                 val snackbar = remember { SnackbarHostState() }
                 val scope = rememberCoroutineScope()
 
+                // The package list's search and filter live here, not on the
+                // screen that draws them. Apps and Audit became separate
+                // composables on 2026-09-13, so a screen that leaves the
+                // composition takes its `remember` with it - and a typed search
+                // silently emptying itself because someone glanced at Audit is
+                // a regression the split must not introduce. rememberSaveable,
+                // so it also survives the process being killed.
+                var query by rememberSaveable { mutableStateOf("") }
+                var onlyOffered by rememberSaveable { mutableStateOf(false) }
+
+                // Blocks Bulwark holds are re-applied when the app is opened,
+                // once, whichever destination the user lands on.
+                //
+                // This used to live in the phone screen's firewall effect. That
+                // was safe while one composable drew both Apps and Audit; after
+                // the split it would have meant the rules were only re-applied
+                // if the user happened to open Audit, and a firewall that
+                // enforces on one tab is not a firewall. `layers/03-firewall.md`
+                // has the reasoning for re-applying at all.
+                LaunchedEffect(Unit) {
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            if (runner.blockedNetworkApps().isNotEmpty()) runner.syncFirewall()
+                        }
+                    }
+                }
+
+                // The audit is the one destination whose content endangers the
+                // person holding the phone if it is seen over their shoulder -
+                // `_shared/threat-model.md` records that discovery can escalate
+                // abuse. It is marked while it is on screen and unmarked when
+                // it is left, so the package list stays screenshotable for
+                // someone asking a forum for help. security.md OPEN-1.
+                LaunchedEffect(destination) {
+                    WindowHardening.setSensitive(
+                        this@MainActivity,
+                        destination == Destination.AUDIT,
+                    )
+                }
+
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
                     snackbarHost = { SnackbarHost(snackbar) },
@@ -143,15 +186,20 @@ class MainActivity : ComponentActivity() {
                     },
                 ) { innerPadding ->
                     when (destination) {
-                        Destination.APPS, Destination.AUDIT -> PackageListScreen(
+                        Destination.APPS -> AppsScreen(
                             state = state,
                             runner = runner,
                             snackbar = snackbar,
-                            tab = if (destination == Destination.AUDIT) {
-                                PhoneTab.AUDIT
-                            } else {
-                                PhoneTab.APPS
-                            },
+                            query = query,
+                            onQueryChange = { query = it },
+                            onlyOffered = onlyOffered,
+                            onOnlyOfferedChange = { onlyOffered = it },
+                            modifier = Modifier.padding(innerPadding),
+                        )
+                        Destination.AUDIT -> AuditScreen(
+                            state = state,
+                            runner = runner,
+                            snackbar = snackbar,
                             modifier = Modifier.padding(innerPadding),
                         )
                         Destination.CHANGES -> ChangesScreen(
@@ -196,11 +244,16 @@ class MainActivity : ComponentActivity() {
     /**
      * The screens, and the questions they answer.
      *
-     * Two, not one, because a screen that answers two questions becomes a feed
-     * and a feed has no hierarchy (`_shared/design.md` rule 1). Kept to two
-     * rather than the three that file describes: splitting the phone screen
-     * into Apps and Audit is the next step, and doing it in the same change as
-     * introducing navigation would have made a failure impossible to localise.
+     * Three, not one, because a screen that answers two questions becomes a
+     * feed and a feed has no hierarchy (`_shared/design.md` rule 1).
+     *
+     * Three in the code as well as on screen, since 2026-09-13. Apps and Audit
+     * were one composable with a `tab` parameter for a day - what a person saw
+     * was split, the state behind it was not - and `design.md` records why that
+     * retreat was deliberate: the failure mode of threading those values apart
+     * is a card that renders **empty** rather than erroring, and there was no
+     * detector for it. `AuditContentTest` and `AppsContentTest` are that
+     * detector, so the code caught up with the screens.
      */
     private enum class Destination(val label: String) {
         /** Find an app and change it. */

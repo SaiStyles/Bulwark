@@ -68,7 +68,7 @@ class ActionRunner(
      * the seam that matters for tests is inside the reader itself.
      */
     private val deviceDisabled: DeviceDisabledReader = DeviceDisabledReader(),
-) {
+) : RowActions {
 
     /** How an attempt ended, for the UI to report. */
     sealed interface Outcome {
@@ -118,7 +118,7 @@ class ActionRunner(
      *   never "Confirm" - someone who does not know what they are authorising
      *   is not really authorising it.
      */
-    fun disable(
+    override fun disable(
         packageName: String,
         label: String,
         onOutcome: (Outcome) -> Unit,
@@ -140,7 +140,7 @@ class ActionRunner(
      * `PackageActions.switchBackOn` for what hardware testing taught about
      * the difference.
      */
-    fun switchBackOn(
+    override fun switchBackOn(
         packageName: String,
         label: String,
         onOutcome: (Outcome) -> Unit,
@@ -166,7 +166,7 @@ class ActionRunner(
      *   changes the sentence a person reads *while deciding*, so it is passed
      *   rather than guessed at here.
      */
-    fun uninstall(
+    override fun uninstall(
         packageName: String,
         label: String,
         canRestore: Boolean,
@@ -209,7 +209,7 @@ class ActionRunner(
      * describing a batch of one - the prompt is the channel an attacker cannot
      * rewrite, so it should read like the thing the user actually did.
      */
-    fun revokePermission(
+    override fun revokePermission(
         packageName: String,
         permission: String,
         onOutcome: (Outcome) -> Unit,
@@ -330,7 +330,7 @@ class ActionRunner(
      * and `security.md` FIXED-11 applies here as everywhere: anything that can
      * press Bulwark's buttons holds shell by proxy.
      */
-    fun blockNetwork(
+    override fun blockNetwork(
         packageName: String,
         onOutcome: (Outcome) -> Unit,
     ) = authenticated(
@@ -345,7 +345,7 @@ class ActionRunner(
     }
 
     /** Lets it online again. The undo for [blockNetwork]. */
-    fun allowNetwork(
+    override fun allowNetwork(
         packageName: String,
         onOutcome: (Outcome) -> Unit,
     ) = authenticated(

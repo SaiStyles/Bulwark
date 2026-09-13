@@ -69,22 +69,46 @@ object WindowHardening {
     }
 
     /**
-     * Blocks screenshots and hides the window from the recents preview.
+     * Blocks screenshots and hides the window from the recents preview — or
+     * stops doing so.
      *
      * **Not applied globally, deliberately.** Debloat users legitimately want
      * to screenshot a package list to ask for help, and taking that away for
      * no threat-model reason is the kind of security theatre that trains
      * people to distrust real warnings.
      *
-     * Apply it to screens where the *content itself* endangers the user if
-     * seen over their shoulder — the stalkerware findings screen above all,
-     * where `context/_shared/threat-model.md` notes that discovery can
-     * escalate abuse.
+     * It belongs on screens where the *content itself* endangers the user if
+     * seen over their shoulder — the special-access audit and, when it ships,
+     * the stalkerware findings screen, where
+     * `context/_shared/threat-model.md` notes that discovery can escalate
+     * abuse.
+     *
+     * ## Why this takes a boolean rather than only setting the flag
+     *
+     * `FLAG_SECURE` is a property of a **window**, and Bulwark's three
+     * destinations share one. `context/_shared/security.md` OPEN-1 read that
+     * as a blocker: the flag "cannot be applied to half a screen", so the
+     * audit could not have it until it had a window of its own.
+     *
+     * That was true of a *static* flag and only of a static flag. A window can
+     * be marked and unmarked as the visible destination changes, which gives
+     * the audit the protection and leaves the package list screenshotable —
+     * the outcome OPEN-1 actually wanted, without a second Activity. What it
+     * required was that the audit be a screen that can be entered and left,
+     * which it became on 2026-09-13.
+     *
+     * The capture that matters most — the recents thumbnail — is taken when
+     * the app goes to the background, by which time the flag for the visible
+     * destination is already set.
      */
-    fun markSensitive(activity: Activity) {
-        activity.window.setFlags(
-            WindowManager.LayoutParams.FLAG_SECURE,
-            WindowManager.LayoutParams.FLAG_SECURE,
-        )
+    fun setSensitive(activity: Activity, sensitive: Boolean) {
+        if (sensitive) {
+            activity.window.setFlags(
+                WindowManager.LayoutParams.FLAG_SECURE,
+                WindowManager.LayoutParams.FLAG_SECURE,
+            )
+        } else {
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
     }
 }

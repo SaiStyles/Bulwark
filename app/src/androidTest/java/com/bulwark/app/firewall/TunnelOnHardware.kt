@@ -59,7 +59,15 @@ class TunnelOnHardware {
 
         // A real rule in the real log, because that is now where the service
         // looks. Writing one here also exercises the path the screen uses.
-        val rules = FirewallActions(ActionJournal(SqliteActionLog(context))) { false }
+        // Named, not a trailing lambda. `FirewallActions` gained a third
+        // parameter after this line was written, and a trailing lambda binds to
+        // the *last* one - so this quietly stopped supplying the seam it meant
+        // to supply and started supplying a different one. Naming it is what
+        // stops that happening again.
+        val rules = FirewallActions(
+            ActionJournal(SqliteActionLog(context)),
+            systemPackages = { false },
+        )
 
         // Whether the phone's owner already had this blocked, decided BEFORE
         // anything is written. block() does nothing when a rule exists, so a
