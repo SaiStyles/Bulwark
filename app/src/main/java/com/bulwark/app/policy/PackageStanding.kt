@@ -84,24 +84,27 @@ data class Standing(
     val needsCeremony: Boolean get() = !refused && isCritical
 }
 
-/** What one job means, in the words a person is shown. */
+/**
+ * What one job *is*, in the words a person is shown.
+ *
+ * **Identity, never consequence.** These said what would break - "remove it and
+ * there is no screen to come back to", "including emergency calls" - and SAI
+ * cut them on 2026-09-13 for a reason worth keeping: the device can name about
+ * seven things, and writing rich consequence copy for those teaches people to
+ * expect it on the other three hundred, where Bulwark has nothing to say. The
+ * same trap the removal ratings were.
+ *
+ * Naming the thing is enough. Someone typing out a package name to remove
+ * their own dialer does not need to be told what a dialer does.
+ */
 fun CriticalRoles.Job.sentence(): String = when (this) {
-    CriticalRoles.Job.HOME ->
-        "This is your home screen. Remove it and there is no screen to come back to."
-    CriticalRoles.Job.DIALER ->
-        "This is your phone's dialer - how calls are placed, including emergency calls."
-    CriticalRoles.Job.SMS ->
-        "This is your messaging app. Two-factor codes arrive here."
-    CriticalRoles.Job.SYSTEM_UI ->
-        "This draws your status bar, notifications and navigation. Without it the " +
-            "phone is very hard to use at all."
-    CriticalRoles.Job.SETTINGS ->
-        "This is Settings. Without it you cannot change anything on this phone " +
-            "by hand - including changing this back."
-    CriticalRoles.Job.PACKAGE_INSTALLER ->
-        "This installs apps, so it is how anything gets put back by hand."
-    CriticalRoles.Job.IMS ->
-        "This carries your calls over mobile data and Wi-Fi on this phone."
+    CriticalRoles.Job.HOME -> "This is your home screen."
+    CriticalRoles.Job.DIALER -> "This is your phone's dialer."
+    CriticalRoles.Job.SMS -> "This is your messaging app."
+    CriticalRoles.Job.SYSTEM_UI -> "This is the system interface - your status bar and navigation."
+    CriticalRoles.Job.SETTINGS -> "This is Settings."
+    CriticalRoles.Job.PACKAGE_INSTALLER -> "This is what installs apps."
+    CriticalRoles.Job.IMS -> "This is what carries your calls."
 }
 
 /**
@@ -141,31 +144,6 @@ fun Standing.labels(): List<String> = buildList {
                     "reinstall it yourself, and its data is gone."
         }
     )
-}
-
-/**
- * The second warning, which names what stops working rather than repeating
- * that this is serious.
- *
- * Returns null when there is no ceremony, so a caller cannot accidentally show
- * a grave second screen for an ordinary app.
- */
-fun Standing.secondWarning(): String? {
-    if (!needsCeremony) return null
-    // Non-empty by construction: the ceremony only fires when the phone named
-    // at least one job, so the warning always has a consequence to state.
-    val head = CriticalRoles.Job.entries
-        .filter { it in jobs }
-        .joinToString(" ") { it.sentence() }
-    val tail = when (restorability) {
-        Restorability.BULWARK_CAN_RESTORE ->
-            "Bulwark will try to reinstall the version that shipped with the " +
-                "phone - not its data, not its updates, and not while the phone " +
-                "is unusable. Assume it might not come back."
-        Restorability.GONE_FOR_GOOD ->
-            "Bulwark cannot put this one back at all."
-    }
-    return "$head $tail"
 }
 
 /**

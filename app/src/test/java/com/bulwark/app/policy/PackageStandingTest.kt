@@ -32,7 +32,6 @@ class PackageStandingTest {
         assertFalse(s.isCritical)
         assertFalse(s.needsCeremony)
         assertFalse(s.refused)
-        assertNull("no second warning for an ordinary app", s.secondWarning())
     }
 
     @Test
@@ -41,10 +40,10 @@ class PackageStandingTest {
 
         assertTrue(s.isCritical)
         assertTrue(s.needsCeremony)
-        assertTrue(
-            "the warning must name the consequence: ${s.secondWarning()}",
-            s.secondWarning()!!.contains("emergency calls"),
-        )
+        // Identity, not consequence. The dialer label says what it is and
+        // stops - see Job.sentence for why the "including emergency calls"
+        // half was cut.
+        assertTrue(s.labels().first(), s.labels().first().contains("dialer"))
     }
 
     @Test
@@ -79,7 +78,6 @@ class PackageStandingTest {
                 incomplete = incomplete,
             )
             assertFalse("incomplete=$incomplete", s.needsCeremony)
-            assertNull("incomplete=$incomplete", s.secondWarning())
         }
     }
 
@@ -96,10 +94,22 @@ class PackageStandingTest {
     }
 
     @Test
+    fun `labels name what a thing is, never what will break`() {
+        // SAI, 2026-09-13: the device can name seven packages, so consequence
+        // copy exists for seven and nowhere else - writing it teaches people
+        // to expect it on the three hundred where there is nothing to say.
+        val text = Job.entries.joinToString(" ") { it.sentence() }
+        listOf("remove it and", "without it", "stop working", "unusable").forEach {
+            assertFalse("consequence copy survived: $it in $text", text.lowercase().contains(it))
+        }
+        assertTrue("but it still names the thing", Job.SETTINGS.sentence() == "This is Settings.")
+    }
+
+    @Test
     fun `no label promises an outcome Bulwark cannot guarantee`() {
         val texts = listOf(
             standing().labels().joinToString(" "),
-            standing(jobs = setOf(Job.SETTINGS)).secondWarning().orEmpty(),
+            standing(jobs = setOf(Job.SETTINGS)).labels().joinToString(" "),
         )
         listOf("will restore", "can put this back", "guaranteed", "always").forEach { word ->
             texts.forEach { t ->
@@ -152,19 +162,11 @@ class PackageStandingTest {
     }
 
     @Test
-    fun theSecondWarningForAUserInstalledAppSaysItCannotComeBack() {
-        val s = standing(jobs = setOf(Job.IMS), restorability = Restorability.GONE_FOR_GOOD)
-
-        assertTrue(s.secondWarning()!!.contains("cannot put this one back at all"))
-    }
-
-    @Test
     fun noRowCarriesAStrangersVerdict() {
         // The whole point of dropping the UAD badges: Bulwark states facts
         // about this device and never someone else's rating.
         val everything = Job.entries.toSet()
-        val text = standing(jobs = everything).labels().joinToString(" ") +
-            " " + standing(jobs = everything).secondWarning()
+        val text = standing(jobs = everything).labels().joinToString(" ")
 
         listOf("recommended", "safe", "unsafe", "expert", "advanced").forEach { word ->
             assertFalse("a rating word survived: $word in $text", text.lowercase().contains(word))

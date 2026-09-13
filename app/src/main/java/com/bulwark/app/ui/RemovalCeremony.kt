@@ -9,7 +9,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -19,14 +18,21 @@ import com.bulwark.app.policy.Standing
 import com.bulwark.app.policy.confirmationAccepts
 import com.bulwark.app.policy.confirmationPhrase
 import com.bulwark.app.policy.labels
-import com.bulwark.app.policy.secondWarning
 
 /**
  * The gate in front of removing something this phone named as critical.
  *
- * A warning, a second warning that says what stops working, then the package
- * name typed by hand. Authentication happens after this, outside our process,
- * in `ActionRunner` - so the full sequence is read, read again, type, confirm.
+ * What the package is, then its name typed by hand. Authentication happens
+ * after this, outside our process, in `ActionRunner` - so the sequence is read,
+ * type, confirm.
+ *
+ * **It had a second warning and does not any more.** It was meant to name what
+ * would stop working; SAI read it on a phone and said it read like the first
+ * one, and the fix was not better wording. The device can name about seven
+ * packages, so consequence copy exists for seven and nowhere else - writing it
+ * teaches people to expect it on the three hundred where Bulwark has nothing
+ * to say. A stage that cannot say something genuinely new is a button people
+ * learn to tap through, which spends the attention the typing needs.
  *
  * ## Who sees it
  *
@@ -55,7 +61,7 @@ fun RemovalCeremony(
 ) {
     // Keyed on the package, so opening a different row starts at stage one
     // with an empty field rather than inheriting the last one's progress.
-    var stage by remember(standing.packageName) { mutableIntStateOf(1) }
+    var typing by remember(standing.packageName) { mutableStateOf(false) }
     var typed by remember(standing.packageName) { mutableStateOf("") }
 
     val accepted = standing.confirmationAccepts(typed)
@@ -64,55 +70,45 @@ fun RemovalCeremony(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                when (stage) {
-                    1 -> "Remove ${standing.packageName}?"
-                    2 -> "This is what stops working"
-                    else -> "Type the name to confirm"
-                },
+                if (typing) "Type the name to confirm" else "Remove ${standing.packageName}?",
             )
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                when (stage) {
-                    // One: what the phone says this is. The label does the
-                    // teaching, so it is shown in full rather than summarised.
-                    1 -> standing.labels().forEach { Text(it) }
-
-                    // Two: the consequence, stated once and plainly. Not a
-                    // repeat of "are you sure" - a second identical warning
-                    // teaches people that warnings carry no information.
-                    2 -> Text(standing.secondWarning().orEmpty())
-
-                    else -> {
-                        Text(
-                            "Type ${standing.confirmationPhrase()} to remove it.",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        OutlinedTextField(
-                            value = typed,
-                            onValueChange = { typed = it },
-                            singleLine = true,
-                            label = { Text("Package name") },
-                            modifier = Modifier,
-                        )
-                        // Said here rather than after: the fingerprint prompt
-                        // is the system's and cannot carry our wording.
-                        Text(
-                            "You will be asked to confirm it is you.",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
+                if (!typing) {
+                    // What the phone says this is, and whether Bulwark could
+                    // put it back. The labels do the whole job; there is no
+                    // second screen restating them.
+                    standing.labels().forEach { Text(it) }
+                } else {
+                    Text(
+                        "Type ${standing.confirmationPhrase()} to remove it.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    OutlinedTextField(
+                        value = typed,
+                        onValueChange = { typed = it },
+                        singleLine = true,
+                        label = { Text("Package name") },
+                        modifier = Modifier,
+                    )
+                    // Said here rather than after: the fingerprint prompt is
+                    // the system's and cannot carry our wording.
+                    Text(
+                        "You will be asked to confirm it is you.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
             }
         },
         confirmButton = {
             TextButton(
-                // The last step is the only one that can act, and only with
-                // the name typed exactly. Every earlier button advances.
-                enabled = stage < 3 || accepted,
-                onClick = { if (stage < 3) stage++ else onConfirmed() },
+                // Only the second step can act, and only with the name typed
+                // exactly. The first advances.
+                enabled = !typing || accepted,
+                onClick = { if (!typing) typing = true else onConfirmed() },
             ) {
-                Text(if (stage < 3) "Continue" else "Remove it")
+                Text(if (!typing) "Continue" else "Remove it")
             }
         },
         dismissButton = {
