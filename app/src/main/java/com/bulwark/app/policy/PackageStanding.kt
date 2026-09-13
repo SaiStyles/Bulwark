@@ -77,11 +77,17 @@ data class Standing(
      * a warning, it is friction, and it teaches people to type through the one
      * that mattered. One failed read would have put the ceremony on all 370.
      *
-     * So an incomplete check is *said* rather than escalated - it appears in
-     * [labels] and the screen says which job could not be read. Honest, and
-     * still quiet enough that the ceremony keeps its meaning.
+     * So an incomplete check is *said* rather than escalated.
+     *
+     * **And never for an app the user installed** (SAI, 2026-09-13), whatever
+     * role the device says it holds. `com.jio.myjio` holds the SMS role here
+     * and is still theirs: they chose it, Android already lets them remove it
+     * in two taps, and Bulwark making them type a package name for their own
+     * app is ceremony about someone else's decision. The gate is for what came
+     * with the phone.
      */
-    val needsCeremony: Boolean get() = !refused && isCritical
+    val needsCeremony: Boolean get() =
+        !refused && isCritical && restorability == Restorability.BULWARK_CAN_RESTORE
 }
 
 /**
