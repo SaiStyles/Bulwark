@@ -30,8 +30,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.bulwark.app.firewall.AlwaysOn
-import com.bulwark.app.observability.AppOpLedger
-import com.bulwark.app.observability.DozeExemptions
 import com.bulwark.app.firewall.Firewall
 import com.bulwark.app.firewall.FirewallState
 import com.bulwark.app.firewall.firewallDetail
@@ -50,7 +48,6 @@ import com.bulwark.app.permissions.ratFindings
 import com.bulwark.app.permissions.summarise
 import com.bulwark.app.policy.ActionRecord
 import com.bulwark.app.shizuku.CloseAction
-import com.bulwark.app.shizuku.DumpsysAccess
 import com.bulwark.app.shizuku.Closeable
 import com.bulwark.app.shizuku.PrivilegedPackages
 import com.bulwark.app.shizuku.RuntimePermissionAccess
@@ -60,7 +57,6 @@ import com.bulwark.app.shizuku.doneForNowHeadline
 import com.bulwark.app.shizuku.whatCanBeClosed
 import com.bulwark.app.ui.theme.CautionBackground
 import com.bulwark.app.ui.theme.CautionText
-import com.bulwark.app.ui.theme.Incomplete
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -69,7 +65,7 @@ import kotlinx.coroutines.withContext
 /**
  * Everything the audit renders, as data.
  *
- * **No defaults, deliberately.** Twenty values reach this screen from six
+ * **No defaults, deliberately.** Sixteen values reach this screen from four
  * separate reads, and the failure this type exists to prevent is one of them
  * silently not arriving - which draws a card with nothing in it rather than an
  * error. A default would turn that into a value the compiler is happy with. No
@@ -99,14 +95,6 @@ data class AuditReadings(
     val alwaysOn: AlwaysOn,
     val lockdown: Boolean,
     val shizukuReady: Boolean,
-    /** Null until the Doze read lands. Empty is a different fact from absent. */
-    val doze: DozeExemptions.Reading?,
-    /** Why the Doze read produced nothing usable. Null when it worked. */
-    val dozeCouldNotTell: String?,
-    /** Null until the app-op ledger lands. Empty is a different fact from absent. */
-    val ledger: List<AppOpLedger.Summary>?,
-    /** Why the ledger produced nothing usable. Null when it worked. */
-    val ledgerCouldNotTell: String?,
 )
 
 /**
@@ -116,6 +104,11 @@ data class AuditReadings(
  * `_shared/design.md` rule 1 - one screen, one question. This one answers
  * "what can the software on this phone do to me", and nothing here changes a
  * package; that is the Apps screen's job.
+ *
+ * **What apps actually *did* moved to `ActivityScreen` on 2026-09-13.** This
+ * screen had quietly grown a second question - capability here, behaviour
+ * there - and two questions on one screen is a feed. The Doze and app-op cards
+ * went with it.
  *
  * ## Why this is two composables
  *
@@ -163,10 +156,6 @@ fun AuditScreen(
     var aVpnIsUp by remember { mutableStateOf(false) }
     var alwaysOn by remember { mutableStateOf(AlwaysOn.CANNOT_TELL) }
     var lockdown by remember { mutableStateOf(false) }
-    var doze by remember { mutableStateOf<DozeExemptions.Reading?>(null) }
-    var dozeCouldNotTell by remember { mutableStateOf<String?>(null) }
-    var ledger by remember { mutableStateOf<List<AppOpLedger.Summary>?>(null) }
-    var ledgerCouldNotTell by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
 
     val ready = state is ShizukuState.Ready
@@ -327,79 +316,6 @@ fun AuditScreen(
         refinedPermissions = emptySet()
     }
 
-    // What is allowed to keep working while the phone sleeps.
-    //
-    // Needs Shizuku: `android.permission.DUMP` is signatureOrSystem, which is
-    // the whole reason this is worth showing - no Play Store app can. Cleared
-    // rather than kept when the server dies, for the same reason the permission
-    // sweep is: data we cannot re-read is a claim with no source.
-    LaunchedEffect(ready, reload) {
-        if (!ready) {
-            doze = null
-            dozeCouldNotTell = null
-            return@LaunchedEffect
-        }
-        val reading = withContext(Dispatchers.IO) {
-            DumpsysAccess.read(DumpsysAccess.Dump.DOZE_WHITELIST)
-        }
-        when (reading) {
-            is DumpsysAccess.Reading.Lines -> {
-                val parsed = DozeExemptions.parse(reading.lines)
-                doze = parsed
-                // Rows arrived but none parsed: that is a reach failure, not a
-                // phone with nothing exempt, and it must not read as one.
-                dozeCouldNotTell = if (parsed.readNothing) {
-                    "Bulwark reached this phone's sleep settings but could not " +
-                        "read the answer it got back."
-                } else {
-                    null
-                }
-            }
-            is DumpsysAccess.Reading.CouldNotTell -> {
-                doze = null
-                dozeCouldNotTell = reading.why
-            }
-        }
-    }
-
-    // When apps used the microphone, camera and precise location, and whether
-    // they were in front of you at the time.
-    //
-    // Three dumps rather than one: `--op` filters at the source, and the
-    // unfiltered dump is 2.29 MB against 149 KB for one op. Sequential and off
-    // the main thread - three binder transactions that each produce a few
-    // thousand lines are not something to run while anyone is scrolling.
-    LaunchedEffect(ready, reload) {
-        if (!ready) {
-            ledger = null
-            ledgerCouldNotTell = null
-            return@LaunchedEffect
-        }
-        val outcome = withContext(Dispatchers.IO) {
-            val readings = mutableListOf<AppOpLedger.Reading>()
-            val failures = mutableListOf<String>()
-            for (op in AppOpLedger.Op.entries) {
-                when (val dump = DumpsysAccess.read(dumpFor(op))) {
-                    is DumpsysAccess.Reading.Lines ->
-                        readings += AppOpLedger.parse(dump.lines, op)
-                    is DumpsysAccess.Reading.CouldNotTell -> failures += dump.why
-                }
-            }
-            readings to failures
-        }
-        val (readings, failures) = outcome
-        // One op failing is not the whole card failing, but it is not nothing
-        // either: the list is short by an unknown amount and must say so.
-        ledger = if (readings.isEmpty()) null else AppOpLedger.summarise(readings)
-        ledgerCouldNotTell = when {
-            readings.isEmpty() -> failures.firstOrNull()
-                ?: "Bulwark could not read this phone's record of app activity."
-            failures.isNotEmpty() ->
-                "Bulwark could not read all three of these, so the list may be short."
-            else -> AppOpLedger.unreadableNotice(readings)
-        }
-    }
-
     AuditContent(
         readings = AuditReadings(
             access = access,
@@ -418,10 +334,6 @@ fun AuditScreen(
             alwaysOn = alwaysOn,
             lockdown = lockdown,
             shizukuReady = ready,
-            doze = doze,
-            dozeCouldNotTell = dozeCouldNotTell,
-            ledger = ledger,
-            ledgerCouldNotTell = ledgerCouldNotTell,
         ),
         onOpenVpnSettings = { runCatching { context.startActivity(Firewall.vpnSettings()) } },
         onAllowVpn = { runner.requestVpnConsent() },
@@ -611,40 +523,6 @@ fun AuditContent(
                     )
                 }
 
-                // The sharpest card on the screen, so it goes above the Doze
-                // one: both answer "what did this app do", and a timestamped
-                // use of the microphone outranks a sleep exemption.
-                //
-                // Slot emitted from the first composition, like every card
-                // here - a late read that adds an item shifts the scroll
-                // anchor, which already hid one card on this screen.
-                item(key = "ledger") {
-                    LedgerCard(
-                        summaries = readings.ledger,
-                        couldNotTell = readings.ledgerCouldNotTell,
-                        shizukuReady = readings.shizukuReady,
-                    )
-                }
-
-                // What keeps running while the phone sleeps.
-                //
-                // Below the permission view because that one answers a bigger
-                // question - who can hear you - and this one is about
-                // behaviour rather than capability.
-                //
-                // The slot is emitted from the first composition, like the
-                // access card above it and for the same reason: a late read
-                // that *adds* a `LazyColumn` item shifts everything under it
-                // relative to the scroll anchor. That already hid one card on
-                // this screen. `design.md` carries the rule.
-                item(key = "doze") {
-                    DozeCard(
-                        reading = readings.doze,
-                        couldNotTell = readings.dozeCouldNotTell,
-                        shizukuReady = readings.shizukuReady,
-                    )
-                }
-
                 // Nothing guards this. It once sat after an early return
                 // belonging to the package list, which made the offer
                 // unreachable in exactly the state where half of it is the
@@ -736,176 +614,6 @@ private fun FirewallCard(
                     TextButton(onClick = onAllow) { Text("Allow Bulwark to run it") }
                 state != FirewallState.NOTHING_BLOCKED && alwaysOn != AlwaysOn.ON ->
                     TextButton(onClick = onOpenVpnSettings) { Text("Open VPN settings") }
-            }
-        }
-    }
-}
-
-/** Which dump answers for which op. Kept beside the effect that uses it. */
-private fun dumpFor(op: AppOpLedger.Op): DumpsysAccess.Dump = when (op) {
-    AppOpLedger.Op.MICROPHONE -> DumpsysAccess.Dump.MICROPHONE_USES
-    AppOpLedger.Op.CAMERA -> DumpsysAccess.Dump.CAMERA_USES
-    AppOpLedger.Op.PRECISE_LOCATION -> DumpsysAccess.Dump.PRECISE_LOCATION_USES
-}
-
-/**
- * When apps used the microphone, camera and precise location **while they were
- * not in front of you**.
- *
- * The sharpest thing Bulwark shows, and the one Android keeps and does not
- * display: the Privacy Dashboard covers 24 hours, coarsely, and never says
- * whether the app was on screen at the time.
- *
- * ## Why this card is careful
- *
- * A ledger of who used the microphone is the most sensitive thing in the app -
- * it is why `security.md` OPEN-1 existed - so it lives on Audit, which is
- * `FLAG_SECURE`. And it states rather than accuses: a music app recording in
- * the background, or a navigation app holding location, is doing the job it
- * was installed for. `design.md` rule 4 - no colour here, because colour would
- * make every row read as a finding.
- */
-@Composable
-private fun LedgerCard(
-    summaries: List<AppOpLedger.Summary>?,
-    couldNotTell: String?,
-    shizukuReady: Boolean,
-) {
-    Card {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                "What apps did while you were not looking",
-                style = MaterialTheme.typography.titleMedium,
-            )
-
-            when {
-                !shizukuReady -> Text(
-                    "Shizuku is not running. This record is kept by Android and " +
-                        "never shown to you, and reading it needs the access " +
-                        "Shizuku provides.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Incomplete,
-                )
-
-                summaries == null && couldNotTell != null -> Text(
-                    couldNotTell,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Incomplete,
-                )
-
-                summaries == null -> Text(
-                    "Checking…",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-
-                else -> {
-                    Text(
-                        AppOpLedger.headline(summaries),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    AppOpLedger.detail(summaries)?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall)
-                    }
-                    couldNotTell?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = Incomplete)
-                    }
-                    summaries.forEach { summary ->
-                        Text(
-                            AppOpLedger.line(summary),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * What is allowed to keep working while the phone sleeps.
- *
- * The first thing Bulwark shows that **no Play Store app can** -
- * `android.permission.DUMP` is `signatureOrSystem`, so this list is reachable
- * only through Shizuku. `capability-research/observability.md` has the ranking
- * and the other five sources.
- *
- * ## What this card refuses to do
- *
- * It does not accuse. An exemption is a capability, not a symptom: a messaging
- * app that must receive messages while the phone is idle has an ordinary
- * reason to be here, and colouring the list would make every row look like a
- * finding. `design.md` rule 7 - name what a thing is - and rule 4, colour is
- * meaning.
- *
- * It also does not offer a fix it does not have. Taking an app off this list is
- * a *write* to `deviceidle`, and `DumpsysAccess` is a closed set of reads on
- * purpose, so the copy points at what Bulwark can actually do instead.
- */
-@Composable
-private fun DozeCard(
-    reading: DozeExemptions.Reading?,
-    couldNotTell: String?,
-    shizukuReady: Boolean,
-) {
-    Card {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                "What keeps running while your phone sleeps",
-                style = MaterialTheme.typography.titleMedium,
-            )
-
-            when {
-                // Said out loud rather than shown as an empty list. Three
-                // different silences used to look identical on this screen.
-                // Deliberately not "Start Shizuku to see this" - the
-                // permissions card above already opens with that exact
-                // sentence, and two identical sentences on one screen is the
-                // near-identical-copy problem `design.md` keeps cutting.
-                !shizukuReady -> Text(
-                    "Shizuku is not running. Android does not let an ordinary " +
-                        "app ask which apps are exempt from sleeping, which is " +
-                        "why this list is worth showing - and why Bulwark " +
-                        "cannot read it on its own.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Incomplete,
-                )
-
-                couldNotTell != null && reading == null -> Text(
-                    couldNotTell,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Incomplete,
-                )
-
-                reading == null -> Text(
-                    "Checking…",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-
-                else -> {
-                    Text(
-                        DozeExemptions.headline(reading),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    DozeExemptions.detail(reading)?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall)
-                    }
-                    // The partial-read warning sits with the list it qualifies,
-                    // never folded away: a short list read as complete is the
-                    // false all-clear this whole file is written against.
-                    DozeExemptions.unreadableNotice(reading)?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = Incomplete)
-                    }
-                    couldNotTell?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = Incomplete)
-                    }
-                    reading.exemptions.forEach { exemption ->
-                        Text(
-                            exemption.packageName,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                        )
-                    }
-                }
             }
         }
     }

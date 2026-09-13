@@ -88,6 +88,34 @@ object DumpsysAccess {
 
         /** As [MICROPHONE_USES], for precise location. */
         PRECISE_LOCATION_USES("appops", listOf("--op", "FINE_LOCATION")),
+
+        /**
+         * Which apps woke the phone, and how often.
+         *
+         * No arguments: `dumpsys alarm` ignores `-h` and prints its whole
+         * state, so there is nothing to filter with. 1,505 lines and 117 KB,
+         * which is small enough to read whole.
+         */
+        ALARM_WAKEUPS("alarm", emptyList()),
+
+        /**
+         * Which apps asked the phone's sensors for data.
+         *
+         * **No arguments, and here that is a guardrail rather than a
+         * limitation.** `sensorservice` accepts `enable`, `disable` and
+         * `restrict` as dump arguments, and every one of them *writes* - this
+         * is the clearest case in the app of a dump interface that is really a
+         * command surface. Passing nothing is the only safe call, and guardrail
+         * 1 is why the argument list is not the caller's to choose.
+         */
+        SENSOR_REGISTRATIONS("sensorservice", emptyList()),
+
+        /**
+         * What has a standing request for the phone's location.
+         *
+         * No arguments; 631 lines and 70 KB.
+         */
+        LOCATION_REQUESTS("location", emptyList()),
     }
 
     /** What one dump produced, or why it produced nothing usable. */

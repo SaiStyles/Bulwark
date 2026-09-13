@@ -11,8 +11,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.bulwark.app.firewall.AlwaysOn
-import com.bulwark.app.observability.AppOpLedger
-import com.bulwark.app.observability.DozeExemptions
 import com.bulwark.app.permissions.Access
 import com.bulwark.app.permissions.AppAccess
 import com.bulwark.app.permissions.PermissionAcrossApps
@@ -32,7 +30,7 @@ import org.junit.runner.RunWith
  * The detector the screen split waited on.
  *
  * `_shared/design.md` records why Apps and Audit stayed one composable with a
- * `tab` parameter: threading twenty values into a screen of their own has a
+ * `tab` parameter: threading sixteen values into a screen of their own has a
  * failure mode of a card that renders **empty** rather than erroring, and with
  * no Compose tests a screenshot was the only thing that could catch it - and
  * only if you already knew what should have been there.
@@ -149,87 +147,6 @@ class AuditContentTest {
         compose.onNodeWithText("What apps can do to you").assertIsDisplayed()
     }
 
-    /**
-     * The Doze card - the first thing Bulwark shows that no Play Store app
-     * can. Asserted by its content, like every other card here.
-     */
-    @Test
-    fun theDozeCardNamesTheAppsThatKeepRunning() {
-        render(fullyLoaded())
-
-        scrollTo("keeps running while your phone sleeps")
-        compose.onNodeWithText("What keeps running while your phone sleeps").assertIsDisplayed()
-        compose.onNodeWithText(
-            "1 app is allowed to keep working while your phone sleeps.",
-        ).assertIsDisplayed()
-    }
-
-    /**
-     * Bulwark reads this list and cannot edit it. A card that implied
-     * otherwise would be the false sense of protection `safety-rules.md`
-     * calls worse than none.
-     */
-    @Test
-    fun theDozeCardNeverImpliesBulwarkCanRemoveAnExemption() {
-        render(fullyLoaded())
-
-        scrollTo("cannot take an app off the list")
-        compose.onNodeWithText("cannot take an app off the list", substring = true)
-            .assertIsDisplayed()
-    }
-
-    /** Without Shizuku it says so, rather than showing an empty list. */
-    @Test
-    fun theDozeCardSaysWhyItIsEmptyWithoutShizuku() {
-        render(fullyLoaded().copy(shizukuReady = false, doze = null))
-
-        scrollTo("which apps are exempt from sleeping")
-        compose.onNodeWithText("which apps are exempt from sleeping", substring = true)
-            .assertIsDisplayed()
-    }
-
-    /**
-     * The ledger card. Asserted by the sentence a person actually reads, not
-     * by its title - a title above an empty body is the failure this file
-     * exists to catch.
-     */
-    @Test
-    fun theLedgerCardNamesWhoUsedWhatAndWhen() {
-        render(fullyLoaded())
-
-        scrollTo("while you were not looking")
-        compose.onNodeWithText("What apps did while you were not looking").assertIsDisplayed()
-        compose.onNodeWithText(
-            "com.example.tracker used the microphone once, " +
-                "most recently 2026-09-13 21:36",
-        ).assertIsDisplayed()
-    }
-
-    /** It reports; it does not accuse. */
-    @Test
-    fun theLedgerCardRefusesToAccuse() {
-        render(fullyLoaded())
-
-        scrollTo("leaves the judgement to you")
-        compose.onNodeWithText("leaves the judgement to you", substring = true)
-            .assertIsDisplayed()
-    }
-
-    /**
-     * An empty ledger is good news and has to read as good news, not as a
-     * card that failed to load.
-     */
-    @Test
-    fun anEmptyLedgerSaysNothingHappenedRatherThanGoingBlank() {
-        render(fullyLoaded().copy(ledger = emptyList()))
-
-        scrollTo("while it was out of sight")
-        compose.onNodeWithText(
-            "No app used the microphone, camera or your precise location " +
-                "while it was out of sight.",
-        ).assertIsDisplayed()
-    }
-
     @Test
     fun theFirewallCardAppearsOnlyWhenARuleExists() {
         render(fullyLoaded().copy(blockedApps = emptySet()))
@@ -327,22 +244,6 @@ class AuditContentTest {
             alwaysOn = AlwaysOn.ON,
             lockdown = false,
             shizukuReady = true,
-            doze = DozeExemptions.parse(
-                listOf("user,com.example.tracker,10231"),
-            ),
-            dozeCouldNotTell = null,
-            ledger = AppOpLedger.summarise(
-                listOf(
-                    AppOpLedger.parse(
-                        listOf(
-                            "Package com.example.tracker:",
-                            "Access: [bg-s] 2026-09-13 21:36:06.258 (-1h)",
-                        ),
-                        AppOpLedger.Op.MICROPHONE,
-                    ),
-                ),
-            ),
-            ledgerCouldNotTell = null,
         )
     }
 }

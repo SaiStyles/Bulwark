@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
+import com.bulwark.app.ui.ActivityScreen
 import com.bulwark.app.ui.AppsScreen
 import com.bulwark.app.ui.AuditScreen
 import com.bulwark.app.ui.ChangesScreen
@@ -156,16 +157,23 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // The audit is the one destination whose content endangers the
-                // person holding the phone if it is seen over their shoulder -
-                // `_shared/threat-model.md` records that discovery can escalate
-                // abuse. It is marked while it is on screen and unmarked when
-                // it is left, so the package list stays screenshotable for
-                // someone asking a forum for help. security.md OPEN-1.
+                // Audit and Activity are the destinations whose content
+                // endangers the person holding the phone if it is seen over
+                // their shoulder - `_shared/threat-model.md` records that
+                // discovery can escalate abuse. Each is marked while it is on
+                // screen and unmarked when it is left, so the package list
+                // stays screenshotable for someone asking a forum for help.
+                // security.md OPEN-1, closed as FIXED-12.
+                //
+                // Activity was added to this on the same commit that created
+                // it. A timestamped record of who used the microphone is
+                // *more* sensitive than the audit, not less, and a new screen
+                // that quietly missed the flag would be the control being
+                // described rather than running.
                 LaunchedEffect(destination) {
                     WindowHardening.setSensitive(
                         this@MainActivity,
-                        destination == Destination.AUDIT,
+                        destination == Destination.AUDIT || destination == Destination.ACTIVITY,
                     )
                 }
 
@@ -200,6 +208,10 @@ class MainActivity : ComponentActivity() {
                             state = state,
                             runner = runner,
                             snackbar = snackbar,
+                            modifier = Modifier.padding(innerPadding),
+                        )
+                        Destination.ACTIVITY -> ActivityScreen(
+                            state = state,
                             modifier = Modifier.padding(innerPadding),
                         )
                         Destination.CHANGES -> ChangesScreen(
@@ -244,7 +256,7 @@ class MainActivity : ComponentActivity() {
     /**
      * The screens, and the questions they answer.
      *
-     * Three, not one, because a screen that answers two questions becomes a
+     * Four, not one, because a screen that answers two questions becomes a
      * feed and a feed has no hierarchy (`_shared/design.md` rule 1).
      *
      * Three in the code as well as on screen, since 2026-09-13. Apps and Audit
@@ -261,6 +273,16 @@ class MainActivity : ComponentActivity() {
 
         /** What is true about this phone: access, permissions, the firewall. */
         AUDIT("Audit"),
+
+        /**
+         * What the apps here actually did: wakeups, sensor reads, location
+         * requests, and the app-op ledger.
+         *
+         * Split from Audit on 2026-09-13. Audit answers what software *can* do
+         * and this answers what it *did* - different questions, and both were
+         * competing for the top of one scroll.
+         */
+        ACTIVITY("Activity"),
 
         /** What Bulwark changed, and taking it back. */
         CHANGES("Changes"),
