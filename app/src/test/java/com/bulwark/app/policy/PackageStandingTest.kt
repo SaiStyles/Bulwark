@@ -86,14 +86,19 @@ class PackageStandingTest {
         // com.jio.myjio holds the SMS role on the test phone and is still the
         // user's own app. SAI, 2026-09-13: the gate is for what came with the
         // phone, not for a choice they already made.
-        val theirs = standing(
-            name = "com.jio.myjio",
-            jobs = setOf(Job.SMS),
-            restorability = Restorability.GONE_FOR_GOOD,
+        val roles = CriticalRoles.Reading(
+            mapOf("com.jio.myjio" to setOf(Job.SMS)), emptySet(),
         )
+        val theirs = standingFor("com.jio.myjio", isSystem = false, roles, "com.bulwark.app")
 
-        assertTrue("the badge still tells them what it is", theirs.isCritical)
-        assertFalse("but no ceremony", theirs.needsCeremony)
+        assertTrue("no job is attributed to it at all", theirs.jobs.isEmpty())
+        assertNull("no badge", theirs.badge())
+        assertFalse("no ceremony", theirs.needsCeremony)
+        // And the preinstalled holder of the same role still gets both.
+        val oem = standingFor("com.oem.messages", isSystem = true,
+            CriticalRoles.Reading(mapOf("com.oem.messages" to setOf(Job.SMS)), emptySet()),
+            "com.bulwark.app")
+        assertEquals("MESSAGES", oem.badge())
     }
 
     @Test

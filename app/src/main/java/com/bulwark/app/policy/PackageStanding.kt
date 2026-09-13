@@ -210,7 +210,10 @@ fun standingFor(
     selfPackage: String,
 ): Standing = Standing(
     packageName = packageName,
-    jobs = roles?.jobsFor(packageName).orEmpty(),
+    // Only for what came with the phone. Bulwark adds no capability over an
+    // app the user installed - Android removes those in two taps - so it has
+    // no business badging them, narrating them, or gating them. SAI, 2026-09-13.
+    jobs = if (isSystem) roles?.jobsFor(packageName).orEmpty() else emptySet(),
     restorability = if (isSystem) {
         Restorability.BULWARK_CAN_RESTORE
     } else {
