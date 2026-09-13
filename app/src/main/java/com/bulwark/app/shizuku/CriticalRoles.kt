@@ -28,6 +28,34 @@ import rikka.shizuku.SystemServiceHelper
  * Nothing here refuses anything. `safety-rules.md` now states the labels and
  * the ceremony; this is only the reading behind them.
  *
+ * ## Two roles do not resolve reliably, and that is accepted - 2026-09-13
+ *
+ * **SMS is broken here.** `sms_default_application` is null on the Agni 2, so
+ * `getDefaultSmsPackage` returns nothing. **IMS is vendor-shaped**: the
+ * `ImsService` interface is standard from Android 9, but the package is not -
+ * MediaTek registers `MtkDynamicImsService`, Samsung has historically bound its
+ * own stack - and minSdk 26 predates the interface entirely.
+ *
+ * **Closed on purpose.** The roles that resolve reliably are exactly the ones
+ * that matter: home, SystemUI, settings and the package installer are the
+ * *route-back* class - remove those and there is no screen left to undo them
+ * from - and all four come from AOSP-standard resolvers every build has. IMS
+ * and SMS are recoverable; Bulwark still opens and still puts them back, so
+ * their badges are courtesy labels rather than safety gates.
+ *
+ * Ceremony on **every** system package was the other option and was rejected:
+ * a gate in front of all 274 is a gate in front of none, and debloating means
+ * removing dozens. The A2b failure at scale.
+ *
+ * **What would reopen this:** a phone where `CATEGORY_HOME`,
+ * `config_systemUIServiceComponent` or the settings resolver fails. IMS alone
+ * is not the signal - do not spend a session chasing it.
+ *
+ * The unused half of the fix, if it is ever needed: the platform resolves its
+ * own IMS provider from the `config_ims_package` overlay, and `RoleManager`
+ * answers for SMS - `cmd role` reads it correctly on this phone while our call
+ * through Shizuku does not, with the exception swallowed.
+ *
  * ## Fail closed
  *
  * Every job is read independently and every read is caught, because one
