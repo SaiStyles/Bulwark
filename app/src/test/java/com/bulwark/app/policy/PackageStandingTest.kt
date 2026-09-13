@@ -96,6 +96,19 @@ class PackageStandingTest {
     }
 
     @Test
+    fun `no label promises an outcome Bulwark cannot guarantee`() {
+        val texts = listOf(
+            standing().labels().joinToString(" "),
+            standing(jobs = setOf(Job.SETTINGS)).secondWarning().orEmpty(),
+        )
+        listOf("will restore", "can put this back", "guaranteed", "always").forEach { word ->
+            texts.forEach { t ->
+                assertFalse("a promise survived: $word in $t", t.contains(word))
+            }
+        }
+    }
+
+    @Test
     fun `Shizuku is refused, because switching it off removes the way back`() {
         // 2026-09-12: it was allowed, SAI switched it off through Bulwark, and
         // Bulwark could not switch it back on - re-enabling needs the privilege
@@ -122,11 +135,18 @@ class PackageStandingTest {
         val userInstalled =
             standing(restorability = Restorability.GONE_FOR_GOOD).labels().last()
 
-        assertTrue(preinstalled, preinstalled.contains("came with the phone"))
+        assertTrue(preinstalled, preinstalled.contains("shipped with"))
         assertTrue(
             "an updated system app comes back as the shipped version, and that " +
                 "is not the same app the user had: $preinstalled",
             preinstalled.contains("update"),
+        )
+        // SAI's rule, 2026-09-13: if one app could break the claim, the user
+        // gets the doubt. Three successes on one device is evidence, not a
+        // promise - so the row must not read like one.
+        assertTrue(
+            "restore must not be stated as a certainty: $preinstalled",
+            preinstalled.contains("try to") || preinstalled.contains("not the same as a promise"),
         )
         assertTrue(userInstalled, userInstalled.contains("cannot put it back"))
     }

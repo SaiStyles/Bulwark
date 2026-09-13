@@ -17,7 +17,14 @@ import com.bulwark.app.shizuku.CriticalRoles
 enum class Restorability {
     /**
      * Preinstalled. `pm uninstall --user 0` leaves the APK on `/system` and
-     * `pm install-existing` restores it. The app returns; its data does not.
+     * `pm install-existing` can reinstall from it.
+     *
+     * **Not a guarantee, and the copy must not read like one.** It is proven on
+     * three packages on one device, which is evidence rather than a promise:
+     * the call has a signature fallback chain that can run out, a restored app
+     * whose dependency was also removed can come back broken, and an OTA can
+     * change what is on `/system`. SAI's rule, 2026-09-13 - if one app could
+     * break the claim, the user gets the doubt rather than the confidence.
      */
     BULWARK_CAN_RESTORE,
 
@@ -89,7 +96,8 @@ fun CriticalRoles.Job.sentence(): String = when (this) {
         "This draws your status bar, notifications and navigation. Without it the " +
             "phone is very hard to use at all."
     CriticalRoles.Job.SETTINGS ->
-        "This is Settings - where you would go to undo things by hand."
+        "This is Settings. Without it you cannot change anything on this phone " +
+            "by hand - including changing this back."
     CriticalRoles.Job.PACKAGE_INSTALLER ->
         "This installs apps, so it is how anything gets put back by hand."
     CriticalRoles.Job.IMS ->
@@ -124,9 +132,10 @@ fun Standing.labels(): List<String> = buildList {
     add(
         when (restorability) {
             Restorability.BULWARK_CAN_RESTORE ->
-                "Preinstalled, so Bulwark can reinstall it from the copy that " +
-                    "came with the phone. Its data is gone, and so is any " +
-                    "update it had - what returns is the version it shipped with."
+                "Preinstalled, so the phone keeps a copy Bulwark can try to " +
+                    "reinstall - the version it shipped with, without your data " +
+                    "or any updates. It has worked on every app tried so far, " +
+                    "which is not the same as a promise about this one."
             Restorability.GONE_FOR_GOOD ->
                 "You installed this. Bulwark cannot put it back - you would " +
                     "reinstall it yourself, and its data is gone."
@@ -150,8 +159,9 @@ fun Standing.secondWarning(): String? {
         .joinToString(" ") { it.sentence() }
     val tail = when (restorability) {
         Restorability.BULWARK_CAN_RESTORE ->
-            "Bulwark can reinstall the version that shipped with the phone - not " +
-                "its data, not its updates, and not while the phone is unusable."
+            "Bulwark will try to reinstall the version that shipped with the " +
+                "phone - not its data, not its updates, and not while the phone " +
+                "is unusable. Assume it might not come back."
         Restorability.GONE_FOR_GOOD ->
             "Bulwark cannot put this one back at all."
     }
