@@ -196,3 +196,101 @@ class MonitoringIndicators(val indicators: List<MonitoringIndicator>) {
         }
     }
 }
+
+/**
+ * The card's headline.
+ *
+ * **A match, never a verdict.** What Bulwark knows is that a package name or a
+ * signing key appears in a public list. It does not know who installed it, why,
+ * or whether the person holding the phone chose it - and `threat-model.md`
+ * forbids writing as though it does.
+ */
+fun monitoringHeadline(findings: List<MonitoringFinding>): String {
+    if (findings.isEmpty()) {
+        return "No app on this phone matches a known monitoring tool."
+    }
+    val apps = if (findings.size == 1) "1 app" else "${findings.size} apps"
+    return "$apps on this phone match a known monitoring tool."
+}
+
+/** The line under the headline. Null when there is nothing to qualify. */
+fun monitoringDetail(findings: List<MonitoringFinding>): String? {
+    if (findings.isEmpty()) return null
+    val its = if (findings.size == 1) "Its package name or signing key appears" else
+        "Their package names or signing keys appear"
+    // "whether you chose it" belongs to the ambiguity note, where it is the
+    // actual question. Saying it twice on one card made the sentence furniture.
+    return "$its in a public list of monitoring software. That is a match, not a " +
+        "verdict: it does not say who put it there, or why."
+}
+
+/**
+ * How one app was recognised, said so the reader learns something from it.
+ *
+ * The certificate case earns its own sentence because it is the interesting
+ * one: it means renaming the app did not hide it.
+ */
+fun MonitoringFinding.recognisedBy(): String = when {
+    signals == setOf(MatchSignal.SIGNING_CERTIFICATE) ->
+        "Recognised by its signing key, so renaming it did not hide it."
+    signals.contains(MatchSignal.SIGNING_CERTIFICATE) ->
+        "Recognised by its package name and its signing key."
+    else -> "Recognised by its package name."
+}
+
+/**
+ * Said only when the lists disagree.
+ *
+ * Does not resolve the disagreement, because the disagreement is real:
+ * `org.findmykids.app` is a genuine family-tracking product that also appears
+ * as monitoring software, and both of those are true at once. The question a
+ * person can answer and Bulwark cannot is whether they chose it.
+ */
+fun MonitoringFinding.ambiguityNote(): String? {
+    if (!ambiguous) return null
+    return "Two lists disagree about this one: it appears both as monitoring " +
+        "software and as a family-tracking app. Both can be true of the same " +
+        "product - the question is whether you chose it."
+}
+
+/**
+ * The quiet line on Audit when nothing matched.
+ *
+ * **Redirects rather than reassures.** The failure this exists to prevent is a
+ * person reading "nothing found" as "I am safe". A list only finds what is on
+ * it, and monitoring software renames itself for a living - so the sentence
+ * points at the behavioural evidence on the rest of the screen, which is what
+ * actually catches something nobody has catalogued.
+ *
+ * **Counts only what can be matched.** The snapshot carries 174 entries and 16
+ * of them publish no package name and no certificate; claiming those would be
+ * the overclaim. Saying 158 tells the truth without a footnote nobody reads.
+ */
+fun monitoringFooter(): String =
+    "Checked against ${MonitoringIndicators.MATCHABLE_ENTRIES} known monitoring " +
+        "tools, by package name and by signing key. Last updated " +
+        "${MonitoringIndicators.SNAPSHOT}. It cannot find one that has been " +
+        "renamed and re-signed, or one nobody has catalogued yet - what finds " +
+        "those is the rest of this screen."
+
+/** Said when the list itself could not be read. Never "nothing found". */
+const val MONITORING_UNREADABLE: String =
+    "Bulwark could not read its list of known monitoring tools, so it has not " +
+        "checked. This is not the same as finding nothing."
+
+/**
+ * Shown before any action is offered, and this is the whole of why the feature
+ * is shaped the way it is.
+ *
+ * Covers both ways monitoring software arrives without assuming either, because
+ * a match cannot tell them apart. Cites the Coalition rather than paraphrasing
+ * advice this project is not qualified to give, and the address is **text, not
+ * a link**: a browser leaves history on a phone somebody else may reach.
+ */
+const val MONITORING_SAFETY_NOTE: String =
+    "Removing it can tell whoever installed it that you know. If that is " +
+        "someone with access to you, that moment is the dangerous one - " +
+        "escalation after discovery is a documented pattern. If it arrived some " +
+        "other way, the risk is lower, but the caution costs you nothing.\n\n" +
+        "There are people who plan for this with you: the Coalition Against " +
+        "Stalkerware, stopstalkerware.org"

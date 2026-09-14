@@ -2,6 +2,7 @@ package com.bulwark.app.security
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -209,5 +210,130 @@ class MonitoringIndicatorsTest {
         val big = (1..5_000).map { app("com.example.app$it", "%040x".format(it)) }
         val found = matcher(SPY, FAMILY).match(big + app("com.mxspy"))
         assertEquals(1, found.size)
+    }
+}
+
+/**
+ * The words, held to the rules that make this feature safe to ship.
+ *
+ * Every assertion here is a sentence `threat-model.md` forbids, or one it
+ * requires. The matcher being correct is worth nothing if the screen then says
+ * the wrong thing about it.
+ */
+class MonitoringCopyTest {
+
+    private companion object {
+        val PLAIN = MonitoringFinding(
+            packageName = "com.systemservice",
+            names = listOf("TheTruthSpy"),
+            kinds = setOf(MonitoringKind.STALKERWARE),
+            signals = setOf(MatchSignal.PACKAGE_NAME),
+        )
+        val BY_CERT = PLAIN.copy(signals = setOf(MatchSignal.SIGNING_CERTIFICATE))
+        val DISPUTED = PLAIN.copy(
+            packageName = "org.findmykids.app",
+            names = listOf("FindMyKids", "SomeTracker"),
+            kinds = setOf(MonitoringKind.STALKERWARE, MonitoringKind.WATCHWARE),
+        )
+    }
+
+    // -- what must never be said ---------------------------------------------
+
+    /** A match is not a verdict, and the copy may not promote it to one. */
+    @Test
+    fun `the copy never asserts that an app is spying`() {
+        val text = monitoringHeadline(listOf(PLAIN)) + " " + monitoringDetail(listOf(PLAIN))
+        listOf("is spying", "is watching you", "is stalkerware", "someone is reading")
+            .forEach { assertTrue("must not claim \"$it\": $text", !text.contains(it, true)) }
+        assertTrue("must say it is a match, not a verdict", text.contains("not a verdict"))
+    }
+
+    /** Removal is never the obvious next step, and never the first word. */
+    @Test
+    fun `the safety note warns before it mentions removing anything`() {
+        val note = MONITORING_SAFETY_NOTE
+        assertTrue(note.contains("can tell whoever installed it"))
+        assertTrue("the danger must be named", note.contains("dangerous"))
+        assertTrue("the Coalition is cited, not paraphrased", note.contains("Coalition Against Stalkerware"))
+        assertTrue("the address is text so nothing opens a browser", note.contains("stopstalkerware.org"))
+    }
+
+    /**
+     * It must cover both routes without assuming either. A match cannot say who
+     * installed it, and SAI's majority case is remote compromise rather than a
+     * partner.
+     */
+    @Test
+    fun `the safety note does not assume an abusive partner`() {
+        assertTrue(
+            "must acknowledge it may have arrived another way",
+            MONITORING_SAFETY_NOTE.contains("arrived some other way"),
+        )
+    }
+
+    // -- the empty case, which is the dangerous one ---------------------------
+
+    @Test
+    fun `nothing matched is never dressed up as being safe`() {
+        val text = monitoringHeadline(emptyList()) + " " + monitoringFooter()
+        listOf("you are safe", "your phone is clean", "nothing is watching", "no monitoring software is")
+            .forEach { assertTrue("must not reassure with \"$it\": $text", !text.contains(it, true)) }
+        assertNull("nothing to qualify when nothing matched", monitoringDetail(emptyList()))
+    }
+
+    /** And it redirects to what actually catches an uncatalogued tool. */
+    @Test
+    fun `the footer names its own limits and points at the behavioural evidence`() {
+        val footer = monitoringFooter()
+        assertTrue("must admit a rename defeats it", footer.contains("renamed and re-signed"))
+        assertTrue("must admit an uncatalogued tool defeats it", footer.contains("catalogued"))
+        assertTrue("must point somewhere useful", footer.contains("rest of this screen"))
+    }
+
+    /**
+     * **Counts only what is matchable.** The snapshot has 174 entries and 16
+     * publish neither a package name nor a certificate; claiming 174 would be
+     * the overclaim, and a footnote about 16 is precision nobody reads.
+     */
+    @Test
+    fun `the footer claims only the entries that can actually be matched`() {
+        val footer = monitoringFooter()
+        assertTrue("must claim the matchable count", footer.contains("158"))
+        assertTrue("must not claim the full upstream count", !footer.contains("174"))
+        assertTrue("a bundled list must show its age", footer.contains(MonitoringIndicators.SNAPSHOT))
+    }
+
+    /** Could-not-check and nothing-found are different sentences. */
+    @Test
+    fun `an unreadable list says so and says it is not the same as finding nothing`() {
+        assertTrue(MONITORING_UNREADABLE.contains("has not checked"))
+        assertTrue(MONITORING_UNREADABLE.contains("not the same as finding nothing"))
+    }
+
+    // -- rows ----------------------------------------------------------------
+
+    @Test
+    fun `a certificate-only match explains why the rename did not help`() {
+        assertTrue(BY_CERT.recognisedBy().contains("renaming it did not hide it"))
+        assertTrue(PLAIN.recognisedBy().contains("package name"))
+    }
+
+    @Test
+    fun `an ambiguous listing is explained, not resolved`() {
+        val note = DISPUTED.ambiguityNote()!!
+        assertTrue("both readings must survive", note.contains("family-tracking"))
+        assertTrue(note.contains("Both can be true"))
+        assertTrue("the question belongs to the person", note.contains("whether you chose it"))
+    }
+
+    @Test
+    fun `an unambiguous finding gets no ambiguity note`() {
+        assertNull(PLAIN.ambiguityNote())
+    }
+
+    @Test
+    fun `one and many are both said in plain English`() {
+        assertTrue(monitoringHeadline(listOf(PLAIN)).startsWith("1 app"))
+        assertTrue(monitoringHeadline(listOf(PLAIN, DISPUTED)).startsWith("2 apps"))
     }
 }

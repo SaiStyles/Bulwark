@@ -14,3 +14,6 @@
 !debug.keystore
 # Kotlin
 .kotlin/
+
+# Local zip backups. Never committed - git history is the real backup.
+backup/

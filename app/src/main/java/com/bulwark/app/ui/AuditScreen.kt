@@ -41,6 +41,16 @@ import com.bulwark.app.permissions.AuditSummary
 import com.bulwark.app.permissions.HiddenSwitch
 import com.bulwark.app.permissions.HiddenSwitchHolder
 import com.bulwark.app.security.AddedCertificates
+import com.bulwark.app.security.InstalledApp
+import com.bulwark.app.security.MONITORING_SAFETY_NOTE
+import com.bulwark.app.security.MONITORING_UNREADABLE
+import com.bulwark.app.security.MonitoringFinding
+import com.bulwark.app.security.MonitoringIndicators
+import com.bulwark.app.security.ambiguityNote
+import com.bulwark.app.security.monitoringDetail
+import com.bulwark.app.security.monitoringFooter
+import com.bulwark.app.security.monitoringHeadline
+import com.bulwark.app.security.recognisedBy
 import com.bulwark.app.permissions.hiddenSwitchDetail
 import com.bulwark.app.permissions.hiddenSwitchHeadline
 import com.bulwark.app.shizuku.AppOpsAccess
@@ -102,6 +112,14 @@ data class AuditReadings(
      * **empty is a real answer here**, and a good one.
      */
     val addedCertificates: List<AddedCertificates.Added>?,
+    /**
+     * Installed apps matching a known monitoring tool. **Null means Bulwark
+     * has not checked** - never "nothing found". Empty means it checked and
+     * matched none, which is a different sentence.
+     */
+    val monitoring: List<MonitoringFinding>?,
+    /** True once a check has run, so the footer can distinguish the two. */
+    val monitoringChecked: Boolean,
     val wirelessDebuggingOn: Boolean,
     val interrupted: List<ActionRecord>,
     /** Null means no read produced a list; the screen says something different for each. */
@@ -157,6 +175,8 @@ fun AuditScreen(
     var ratSignals by remember { mutableStateOf<List<RatFinding>>(emptyList()) }
     var revoking by remember { mutableStateOf<Pair<String, Access>?>(null) }
     var addedCertificates by remember { mutableStateOf<List<AddedCertificates.Added>?>(null) }
+    var monitoring by remember { mutableStateOf<List<MonitoringFinding>?>(null) }
+    var monitoringChecked by remember { mutableStateOf(false) }
     var hiddenSwitches by remember { mutableStateOf<List<HiddenSwitchHolder>?>(null) }
     var hiddenSwitchesCouldNotTell by remember { mutableStateOf<String?>(null) }
     var revokingSwitch by remember { mutableStateOf<Pair<String, HiddenSwitch>?>(null) }
@@ -266,6 +286,34 @@ fun AuditScreen(
         addedCertificates = withContext(Dispatchers.IO) {
             runCatching { AddedCertificates.read() }.getOrNull()
         }
+    }
+
+    // Apps matching a known monitoring tool. **Needs Shizuku**, unlike the
+    // certificate card: it enumerates every package and reads a signing
+    // certificate for each, and neither is reachable without privilege.
+    //
+    // `monitoring` stays null unless a check actually completed. An empty list
+    // and a failed read render as different sentences, and getting that
+    // backwards turns "could not check" into "nothing found".
+    LaunchedEffect(ready, reload) {
+        if (!ready) {
+            monitoring = null
+            monitoringChecked = false
+            return@LaunchedEffect
+        }
+        val outcome = withContext(Dispatchers.IO) {
+            runCatching {
+                val list = MonitoringIndicators.load(context)
+                    ?: error("the indicator list could not be read")
+                val certificates = PrivilegedPackages.signingCertificates()
+                val installed = PrivilegedPackages.listDetailed().map {
+                    InstalledApp(it.packageName, certificates[it.packageName])
+                }
+                list.match(installed)
+            }
+        }
+        monitoring = outcome.getOrNull()
+        monitoringChecked = outcome.isSuccess
     }
 
     // The switches Android gives no screen for. Needs Shizuku: these are app
@@ -392,6 +440,8 @@ fun AuditScreen(
             hiddenSwitchesCouldNotTell = hiddenSwitchesCouldNotTell,
             revokingSwitch = revokingSwitch,
             addedCertificates = addedCertificates,
+            monitoring = monitoring,
+            monitoringChecked = monitoringChecked,
             wirelessDebuggingOn = wirelessDebuggingOn,
             interrupted = interrupted,
             permissionGroups = permissionGroups,
@@ -602,6 +652,18 @@ fun AuditContent(
                     }
                 }
 
+                // **First on the screen when it exists, and absent otherwise.**
+                // A card that appears only on a finding means a clean phone
+                // shows nothing here at all - no permanently visible label for
+                // somebody to read over a shoulder, which is why SAI chose this
+                // over a fifth tab. The cost is that absence reads as
+                // reassurance, and the footer at the bottom pays it.
+                if (readings.monitoring?.isNotEmpty() == true) {
+                    item(key = "monitoring") {
+                        MonitoringCard(readings.monitoring)
+                    }
+                }
+
                 // **Above special access**, which is the only card that
                 // outranks it, because this is the one audit that does not need
                 // Shizuku: on first launch it is the only thing on this screen
@@ -629,6 +691,25 @@ fun AuditContent(
                         shizukuReady = readings.shizukuReady,
                         busy = readings.revokingSwitch,
                         onRevoke = onRevokeSwitch,
+                    )
+                }
+
+                // The quiet half of the monitoring check, and the reason the
+                // card above may be absent without lying. Bottom of the screen,
+                // small type, no heading: a person who wants to know what was
+                // checked finds it, and nobody else is alarmed by it.
+                item(key = "monitoring-footer") {
+                    Text(
+                        when {
+                            !readings.shizukuReady ->
+                                "Shizuku is not running, so Bulwark has not checked " +
+                                    "this phone against known monitoring tools."
+                            readings.monitoring == null && readings.monitoringChecked -> MONITORING_UNREADABLE
+                            readings.monitoring == null -> "Checking this phone against known monitoring tools…"
+                            else -> monitoringFooter()
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
                     )
                 }
 
@@ -724,6 +805,60 @@ fun AuditContent(
  * listing at uid 2000. So the control here opens Android's own screen, and its
  * label says that is what it does rather than implying Bulwark will act.
  */
+/**
+ * Apps matching a known monitoring tool.
+ *
+ * **Report only.** No control here removes anything, and that is not an
+ * oversight: `threat-model.md` forbids presenting removal as the obvious next
+ * step, because for the person this matters most to, the moment of discovery is
+ * the dangerous one. Everything Bulwark can do to an app it can already do from
+ * the Apps screen, deliberately chosen rather than offered here in the second
+ * after a shock.
+ *
+ * The safety note sits **before** the rows, not under them, for the same
+ * reason the export warning precedes the save dialog: a warning that arrives
+ * after the decision is a receipt.
+ */
+@Composable
+private fun MonitoringCard(findings: List<MonitoringFinding>) {
+    Card {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                "Apps that match a known monitoring tool",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(monitoringHeadline(findings), style = MaterialTheme.typography.bodyMedium)
+            monitoringDetail(findings)?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall)
+            }
+
+            Text(
+                MONITORING_SAFETY_NOTE,
+                style = MaterialTheme.typography.bodySmall,
+                color = CautionText,
+                modifier = Modifier.padding(vertical = 8.dp),
+            )
+
+            findings.forEach { finding ->
+                Text(
+                    finding.packageName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+                Text(
+                    "Listed as ${finding.names.joinToString(", ")}.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(finding.recognisedBy(), style = MaterialTheme.typography.bodySmall)
+                finding.ambiguityNote()?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun AddedCertificateCard(
     added: List<AddedCertificates.Added>?,

@@ -20,6 +20,9 @@ import com.bulwark.app.permissions.PermissionAcrossApps
 import com.bulwark.app.permissions.PermissionHolding
 import com.bulwark.app.permissions.RatFinding
 import com.bulwark.app.security.AddedCertificates
+import com.bulwark.app.security.MatchSignal
+import com.bulwark.app.security.MonitoringFinding
+import com.bulwark.app.security.MonitoringKind
 import com.bulwark.app.permissions.audit
 import com.bulwark.app.permissions.summarise
 import com.bulwark.app.policy.ActionKind
@@ -362,6 +365,71 @@ class AuditContentTest {
         compose.onNodeWithText("Open certificate settings").assertIsDisplayed()
     }
 
+    /**
+     * **The sentence this feature must never say by accident.**
+     *
+     * A null list means Bulwark did not check; an empty list means it checked
+     * and matched nothing. They are one field apart and opposite in meaning,
+     * and a screen that renders them the same turns a gap in knowledge into
+     * reassurance.
+     */
+    @Test
+    fun anUncheckedPhoneIsNeverReportedAsAClearOne() {
+        render(fullyLoaded().copy(monitoring = null, monitoringChecked = true))
+
+        scrollTo("has not checked")
+        compose.onNodeWithText("has not checked", substring = true).assertIsDisplayed()
+        compose.onAllNodesWithText("Checked against", substring = true).assertCountEquals(0)
+    }
+
+    /** And a phone that was checked says so, with its limits and its age. */
+    @Test
+    fun aCheckedPhoneSaysWhatWasCheckedAndWhatThatCannotFind() {
+        render(fullyLoaded().copy(monitoring = emptyList(), monitoringChecked = true))
+
+        scrollTo("Checked against")
+        compose.onNodeWithText("renamed and re-signed", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("158", substring = true).assertIsDisplayed()
+    }
+
+    /** No finding, no card - nothing on a clean phone names the subject at all. */
+    @Test
+    fun theMonitoringCardIsAbsentWhenNothingMatched() {
+        render(fullyLoaded().copy(monitoring = emptyList(), monitoringChecked = true))
+
+        scrollTo("Checked against")
+        compose.onAllNodesWithText("match a known monitoring tool.", substring = true)
+            .assertCountEquals(0)
+    }
+
+    /**
+     * A finding leads with the caution, not with the row, and offers no action
+     * at all. Everything Bulwark can do to an app lives on the Apps screen,
+     * chosen deliberately rather than tapped in the second after a shock.
+     */
+    @Test
+    fun aFindingWarnsBeforeItListsAnythingAndOffersNoRemoval() {
+        render(fullyLoaded().copy(monitoring = listOf(FOUND), monitoringChecked = true))
+
+        scrollTo("can tell whoever installed it")
+        compose.onNodeWithText("can tell whoever installed it", substring = true)
+            .assertIsDisplayed()
+        compose.onNodeWithText("com.systemservice").assertIsDisplayed()
+        listOf("Remove", "Uninstall", "Delete", "Switch off").forEach {
+            compose.onAllNodesWithText(it, substring = true).assertCountEquals(0)
+        }
+    }
+
+    /** The disputed case is explained on screen, not silently resolved. */
+    @Test
+    fun anAmbiguousFindingSaysTheListsDisagree() {
+        render(fullyLoaded().copy(monitoring = listOf(DISPUTED), monitoringChecked = true))
+
+        scrollTo("Both can be true")
+        compose.onNodeWithText("Both can be true", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("whether you chose it", substring = true).assertIsDisplayed()
+    }
+
     @Test
     fun theFirewallCardAppearsOnlyWhenARuleExists() {
         render(fullyLoaded().copy(blockedApps = emptySet()))
@@ -391,6 +459,21 @@ class AuditContentTest {
             }
         }
     }
+
+    private val FOUND = MonitoringFinding(
+        packageName = "com.systemservice",
+        names = listOf("TheTruthSpy"),
+        kinds = setOf(MonitoringKind.STALKERWARE),
+        signals = setOf(MatchSignal.SIGNING_CERTIFICATE),
+    )
+
+    /** The real disagreement in the snapshot, not an invented one. */
+    private val DISPUTED = MonitoringFinding(
+        packageName = "org.findmykids.app",
+        names = listOf("FindMyKids", "SomeTracker"),
+        kinds = setOf(MonitoringKind.STALKERWARE, MonitoringKind.WATCHWARE),
+        signals = setOf(MatchSignal.PACKAGE_NAME),
+    )
 
     /** A self-signed root of the shape a debugging proxy or an MDM leaves. */
     private val INTERCEPTION_CA = AddedCertificates.Added(
@@ -446,6 +529,8 @@ class AuditContentTest {
             hiddenSwitchesCouldNotTell = null,
             revokingSwitch = null,
             addedCertificates = emptyList(),
+            monitoring = emptyList(),
+            monitoringChecked = true,
             ratSignals = listOf(
                 RatFinding(
                     headline = "Something can watch your screen and hide itself",
