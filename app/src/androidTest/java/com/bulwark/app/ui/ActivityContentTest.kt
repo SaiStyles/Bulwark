@@ -1,5 +1,8 @@
 package com.bulwark.app.ui
 
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
@@ -134,16 +137,50 @@ class ActivityContentTest {
     }
 
     /**
-     * A long list is cut for readability and the remainder is **stated**. A
-     * list silently trimmed is the false all-clear this screen exists against.
+     * A long list is cut for readability and the remainder is **reachable**.
+     *
+     * Stating it was never enough. SAI, 2026-09-14, on twenty-three apps waking
+     * the phone: "it shows few and says 11 more, and i cant click 11 more".
+     * A count nobody can open is the same dead end the clipboard card had, and
+     * a list silently trimmed is the false all-clear this screen exists against.
      */
     @Test
-    fun aLongListSaysHowManyRowsItDidNotShow() {
-        val many = (1..20).map { "u0a$it:com.example.app$it +1s running, $it wakeups:" }
+    fun aLongListCanBeOpenedRatherThanJustCounted() {
+        // Sorted by wakeups descending, so the one that falls past the cap
+        // is the quietest. Zero-padded so a name is never a substring of
+        // another - "app1" would match "app19" and assert nothing.
+        val many = (1..20).map {
+            "u0a$it:com.example.app%02d".format(it) + " +1s running, $it wakeups:"
+        }
         render(loaded().copy(wakeups = AlarmWakeups.parse(many)))
 
-        scrollTo("and 8 more")
-        compose.onNodeWithText("and 8 more").assertIsDisplayed()
+        // The cap holds at first, and the twentieth row is genuinely absent.
+        scrollTo("Show all 20")
+        compose.onAllNodesWithText("com.example.app01", substring = true).assertCountEquals(0)
+
+        compose.onNodeWithText("Show all 20").performClick()
+        scrollTo("com.example.app01")
+        compose.onNodeWithText("com.example.app01", substring = true).assertIsDisplayed()
+    }
+
+    /** And it folds back up, because expanded is a view and not a door. */
+    @Test
+    fun anOpenedListCanBeClosedAgain() {
+        // Sorted by wakeups descending, so the one that falls past the cap
+        // is the quietest. Zero-padded so a name is never a substring of
+        // another - "app1" would match "app19" and assert nothing.
+        val many = (1..20).map {
+            "u0a$it:com.example.app%02d".format(it) + " +1s running, $it wakeups:"
+        }
+        render(loaded().copy(wakeups = AlarmWakeups.parse(many)))
+
+        scrollTo("Show all 20")
+        compose.onNodeWithText("Show all 20").performClick()
+        scrollTo("Show fewer")
+        compose.onNodeWithText("Show fewer").performClick()
+
+        scrollTo("Show all 20")
+        compose.onAllNodesWithText("com.example.app01", substring = true).assertCountEquals(0)
     }
 
     // -- helpers ------------------------------------------------------------

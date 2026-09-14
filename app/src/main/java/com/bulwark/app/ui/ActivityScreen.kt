@@ -11,6 +11,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -410,6 +412,10 @@ private fun <T> ObservationCard(
     // edge of the screen zig-zagged. Read as broken rather than as designed,
     // and no test could see it - the first screenshot of this screen did,
     // 2026-09-14.
+    // Collapsed by default and saved across rotation, the same way the audit's
+    // clipboard card does it. One idiom for "there is more of this", not two.
+    var expanded by rememberSaveable { mutableStateOf(false) }
+
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
@@ -452,7 +458,8 @@ private fun <T> ObservationCard(
                     // same one step the audit uses. A row is a detail of this
                     // reading, not a peer of its title.
                     val all = rows(loaded)
-                    all.take(MAX_ROWS).forEach { row ->
+                    val shown = if (expanded) all else all.take(MAX_ROWS)
+                    shown.forEach { row ->
                         Text(
                             row,
                             style = MaterialTheme.typography.bodySmall,
@@ -460,11 +467,23 @@ private fun <T> ObservationCard(
                             modifier = Modifier.padding(start = 14.dp),
                         )
                     }
+                    // **"and 11 more" was a dead end.** Twenty-three apps wake
+                    // this phone; twelve were listed and the rest were counted
+                    // at the reader and then withheld, with nothing to press.
+                    // The clipboard card had the same defect and was fixed on
+                    // 2026-09-14; this one kept it for the rest of that day.
+                    //
+                    // The remainder is also **not** the unreadable count. Those
+                    // are different facts - one is "Bulwark knows and did not
+                    // print", the other is "Bulwark could not read it" - and
+                    // they are said in different words and different colours.
                     if (all.size > MAX_ROWS) {
-                        Text(
-                            "and ${all.size - MAX_ROWS} more",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
+                        TextButton(onClick = { expanded = !expanded }) {
+                            Text(
+                                if (expanded) "Show fewer"
+                                else "Show all ${all.size}",
+                            )
+                        }
                     }
                 }
             }
