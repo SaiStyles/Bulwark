@@ -22,16 +22,24 @@ class SpecialAccessActionsTest {
         const val CODE = 92
     }
 
-    /** Drives every branch, and records what was actually written. */
+    /**
+     * Drives every branch, records what was written, and **models the
+     * platform's precedence**: the uid entry wins unless it is `MODE_DEFAULT`.
+     *
+     * The first version let a package write override a uid entry, which is the
+     * one thing that is not true - and it hid the bug that shipped on
+     * 2026-09-14. A fake that does not model the rule under test cannot fail
+     * the way the phone does.
+     */
     private class FakeAccess(
         var door: SpecialAccessActions.Door = SpecialAccessActions.Door.PACKAGE,
         var sharing: List<String> = listOf(APP),
-        var packageMode: Int = 0,
-        /** The package entry as stored, which is not the effective answer. */
+        /** The package entry as stored. Not the effective answer. */
         var packageEntry: Int = 0,
+        /** The uid entry as stored. `MODE_DEFAULT` means there is none. */
         var uidModeValue: Int = 3,
         override val isSupported: Boolean = true,
-        /** When set, the write is swallowed so the read-back sees no change. */
+        /** When set, writes are swallowed so the read-back sees no change. */
         var swallowWrites: Boolean = false,
     ) : SpecialAccessActions.Access {
         val writes = mutableListOf<String>()
@@ -39,22 +47,22 @@ class SpecialAccessActionsTest {
         override fun opCode(opName: String) = CODE
         override fun uidOf(packageName: String, userId: Int) = UID
         override fun packagesSharingUid(uid: Int) = sharing
-        override fun mode(code: Int, uid: Int, packageName: String) = packageMode
         override fun uidMode(code: Int, uid: Int) = uidModeValue
         override fun packageMode(code: Int, uid: Int, packageName: String) = packageEntry
         override fun door(code: Int, uid: Int) = door
 
+        /** Exactly how `checkOperation` resolves it. */
+        override fun mode(code: Int, uid: Int, packageName: String) =
+            if (uidModeValue != 3) uidModeValue else packageEntry
+
         override fun setPackageMode(code: Int, uid: Int, packageName: String, mode: Int) {
             writes += "package:$packageName:$mode"
-            if (!swallowWrites) packageMode = mode
+            if (!swallowWrites) packageEntry = mode
         }
 
         override fun setUidMode(code: Int, uid: Int, mode: Int) {
             writes += "uid:$uid:$mode"
-            if (!swallowWrites) {
-                uidModeValue = mode
-                packageMode = mode
-            }
+            if (!swallowWrites) uidModeValue = mode
         }
     }
 
@@ -140,7 +148,7 @@ class SpecialAccessActionsTest {
 
     @Test
     fun `revoking something already revoked does nothing and records nothing`() {
-        val access = FakeAccess(packageMode = 1)
+        val access = FakeAccess(packageEntry = 1)
         val (actions, log) = journalAnd(access)
 
         actions.revoke(APP, ALL_FILES)
@@ -172,7 +180,7 @@ class SpecialAccessActionsTest {
     fun `both previous modes are recorded so the undo can put back what was there`() {
         val access = FakeAccess(
             door = SpecialAccessActions.Door.UID,
-            packageMode = 0,
+            packageEntry = 0,
             uidModeValue = 0,
         )
         val (actions, log) = journalAnd(access)
@@ -197,7 +205,7 @@ class SpecialAccessActionsTest {
      */
     @Test
     fun `giving it back restores both entries as they were, not as allowed`() {
-        val access = FakeAccess(packageMode = 1, packageEntry = 3, uidModeValue = 1)
+        val access = FakeAccess(packageEntry = 3, uidModeValue = 1)
         val (actions, log) = journalAnd(access)
 
         actions.giveBack(APP, ALL_FILES, previousPackageMode = 3, previousUidMode = 0)
@@ -215,9 +223,8 @@ class SpecialAccessActionsTest {
     fun `the recorded previous state is the package entry, not the effective mode`() {
         val access = FakeAccess(
             door = SpecialAccessActions.Door.UID,
-            packageMode = 0,   // effective: allowed
-            packageEntry = 3,  // but nothing stored against the package
-            uidModeValue = 0,
+            packageEntry = 3,  // nothing stored against the package
+            uidModeValue = 0,  // the uid entry is what allows it
         )
         val (actions, log) = journalAnd(access)
 
@@ -248,4 +255,41 @@ class SpecialAccessActionsTest {
         }
         assertTrue(access.writes.isEmpty())
     }
+
+    /**
+     * The undo that restored nothing and said it worked.
+     *
+     * Happened on hardware, 2026-09-14: a row written by an earlier build
+     * carried a wrong `previous_uid_state`, the undo faithfully wrote it back,
+     * both entries landed, and the app stayed denied while Bulwark recorded
+     * SUCCEEDED. Verifying the *entries* would not have caught it - the writes
+     * did what they were told. Only asking whether the access is usable again
+     * does.
+     */
+    @Test
+    fun `an undo that leaves the app still denied is a failure, not a success`() {
+        // Recorded values that restore to "still ignored" - the garbage case.
+        val access = FakeAccess(packageEntry = 0, uidModeValue = 1)
+        val (actions, log) = journalAnd(access)
+
+        val failed = assertThrows(IllegalStateException::class.java) {
+            actions.giveBack(APP, ALL_FILES, previousPackageMode = 0, previousUidMode = 1)
+        }
+
+        assertTrue(failed.message!!.contains("still"))
+        assertEquals(Phase.FAILED, log.entries.last().phase)
+    }
+
+    /** And Bulwark does not paper over it by inventing a grant. */
+    @Test
+    fun `a failed undo changes nothing beyond what was recorded`() {
+        val access = FakeAccess(packageEntry = 0, uidModeValue = 1)
+        val (actions, _) = journalAnd(access)
+
+        runCatching { actions.giveBack(APP, ALL_FILES, previousPackageMode = 0, previousUidMode = 1) }
+
+        // The two recorded writes, and nothing else - no MODE_ALLOWED rescue.
+        assertEquals(listOf("uid:$UID:1", "package:$APP:0"), access.writes)
+    }
+
 }

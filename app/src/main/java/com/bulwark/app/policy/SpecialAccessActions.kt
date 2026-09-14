@@ -150,6 +150,7 @@ class SpecialAccessActions(
             // neither is read until the next `checkOperation`.
             access.setUidMode(code, uid, previousUidMode)
             access.setPackageMode(code, uid, packageName, previousPackageMode)
+            confirmGiven(code, uid, packageName)
         }
     }
 
@@ -210,6 +211,30 @@ class SpecialAccessActions(
                 Door.PACKAGE -> access.setPackageMode(code, uid, packageName, target)
             }
             confirmApplied(code, uid, packageName, target)
+        }
+    }
+
+    /**
+     * Rule 6 for the undo, and it needs a different question from the revoke.
+     *
+     * Restoring two recorded entries can succeed at the entry level and still
+     * leave the app denied - which is exactly what happened on 2026-09-14, when
+     * a row written by an earlier build carried a wrong `previous_uid_state`
+     * and the undo faithfully wrote it back. Both writes landed. The access
+     * stayed revoked. Bulwark recorded SUCCEEDED.
+     *
+     * So the undo checks the thing the person actually asked for: **is the
+     * access usable again.** It does not then force `MODE_ALLOWED` - inventing
+     * a grant nobody recorded would be Bulwark making a change of its own while
+     * claiming to undo one. It fails, says why, and leaves the decision.
+     */
+    private fun confirmGiven(code: Int, uid: Int, packageName: String) {
+        val effective = access.mode(code, uid, packageName)
+        check(effective != AppOpsWriter.MODE_IGNORED) {
+            "Bulwark put back the settings it recorded and $packageName is still " +
+                "denied this access. The record may have been written before a " +
+                "fix, so it no longer describes what was there. Nothing else was " +
+                "changed - grant it in Settings if you want it back."
         }
     }
 
