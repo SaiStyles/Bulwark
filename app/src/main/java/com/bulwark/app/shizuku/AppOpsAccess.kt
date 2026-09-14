@@ -54,7 +54,21 @@ import rikka.shizuku.SystemServiceHelper
  * it returns the op name, so the response needs no int mapping at all and the
  * int codes are confined to the request.
  *
- * **Entirely read-only.** Nothing here changes an op.
+ * ## The mode that counts is the effective one
+ *
+ * `getPackagesForOps` reports each op's **package** entry. An op can also be
+ * held against the **uid**, and the uid entry wins - so the package entry is
+ * only half the answer. Reading it alone made this card keep listing an app
+ * whose access Bulwark had just taken away through the uid door, on
+ * 2026-09-14: the revoke worked and the screen said otherwise, which is the
+ * worst of both.
+ *
+ * So every candidate is confirmed with `checkOperation`, which resolves both
+ * entries the way the platform does. A few extra binder calls for a handful of
+ * apps, in exchange for the card and the phone agreeing.
+ *
+ * **Entirely read-only.** Nothing here changes an op - `AppOpsWriter.mode` is
+ * borrowed for its read, not for its writes.
  */
 internal object AppOpsAccess {
 
@@ -110,20 +124,19 @@ internal object AppOpsAccess {
             "getPackagesForOps", byCode.keys.toIntArray(),
         ) as? List<Any> ?: return emptyMap()
 
+        val codeFor: Map<Access, Int> = byCode.entries.associate { it.value to it.key }
+
         val result = mutableMapOf<String, MutableSet<Access>>()
         packageOps.forEach { entry ->
             val pkg = PrivilegedBinder.invokeHidden(
                 entry.javaClass, entry, "getPackageName",
             ) as? String ?: return@forEach
+            val uid = PrivilegedBinder.invokeHidden(entry.javaClass, entry, "getUid") as? Int
             val ops = PrivilegedBinder.invokeHidden(
                 entry.javaClass, entry, "getOps",
             ) as? List<Any> ?: return@forEach
 
             ops.forEach { op ->
-                val mode = PrivilegedBinder.invokeHidden(op.javaClass, op, "getMode") as? Int
-                    ?: return@forEach
-                if (mode != MODE_ALLOWED) return@forEach
-
                 // getOpStr() keeps the response in op *names*, so nothing here
                 // depends on the int codes that get reordered between
                 // releases. getOp() is the fallback for platforms without it.
@@ -134,6 +147,20 @@ internal object AppOpsAccess {
                         PrivilegedBinder.invokeHidden(op.javaClass, op, "getOp") as? Int
                     }.getOrNull()?.let { byCode[it] }
                     ?: return@forEach
+
+                // The effective mode, not the package entry this row carries.
+                // Falls back to the package entry only when the uid is unknown,
+                // which is a worse answer and is why it is the fallback.
+                val code = codeFor[access]
+                val effective = if (uid != null && code != null) {
+                    runCatching { AppOpsWriter.mode(code, uid, pkg) }.getOrNull()
+                } else {
+                    null
+                }
+                val mode = effective
+                    ?: PrivilegedBinder.invokeHidden(op.javaClass, op, "getMode") as? Int
+                    ?: return@forEach
+                if (mode != MODE_ALLOWED) return@forEach
 
                 result.getOrPut(pkg) { mutableSetOf() } += access
             }

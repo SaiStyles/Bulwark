@@ -52,6 +52,14 @@ data class Change(
     val permission: String? = null,
     /** The app op, for [ChangeKind.SPECIAL_ACCESS_TAKEN]. Never a permission. */
     val appOp: String? = null,
+    /**
+     * The package and uid entries as they stood before, for the undo.
+     *
+     * Reversible means back to what it was. The op-level undo needs both,
+     * because either can be the one that governs.
+     */
+    val previousPackageMode: Int? = null,
+    val previousUidMode: Int? = null,
     val atEpochMillis: Long = 0L,
     val attribution: Attribution = Attribution.BULWARK,
 )
@@ -222,14 +230,17 @@ private val ActionKind.leavesAChange: Boolean
  */
 fun List<ActionRecord>.currentChanges(): List<Change> {
     val closed = filter { it.phase == Phase.SUCCEEDED }.mapNotNull { it.attemptId }.toSet()
-    // Keyed by the thing changed, not by the action: package for two kinds,
-    // package + permission for the third, so revoking two permissions from one
-    // app is two entries and undoing one leaves the other.
+    // Keyed by the thing changed, not by the action: the package for two kinds,
+    // and the package plus the **capability** for the other two, so revoking
+    // two permissions - or two app ops - from one app is two entries and
+    // undoing one leaves the other. Keying on `permission` alone collapsed
+    // every app-op row for an app into one, because an op row carries its name
+    // in `appOp` and leaves `permission` null.
     val decided = mutableMapOf<Triple<String, ChangeKind, String?>, ActionRecord>()
     filter { it.phase == Phase.ATTEMPTED && it.id in closed }
         .forEach { record ->
             val kind = record.kind.changes ?: return@forEach
-            decided[Triple(record.packageName, kind, record.permission)] = record
+            decided[Triple(record.packageName, kind, record.permission ?: record.appOp)] = record
         }
     return decided
         .filterValues { it.kind.leavesAChange }
@@ -237,7 +248,10 @@ fun List<ActionRecord>.currentChanges(): List<Change> {
             Change(
                 packageName = key.first,
                 kind = key.second,
-                permission = key.third,
+                permission = record.permission,
+                appOp = record.appOp,
+                previousPackageMode = record.previousState,
+                previousUidMode = record.previousUidState,
                 atEpochMillis = record.atEpochMillis,
             )
         }

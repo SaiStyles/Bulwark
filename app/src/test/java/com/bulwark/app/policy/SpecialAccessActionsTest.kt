@@ -27,6 +27,8 @@ class SpecialAccessActionsTest {
         var door: SpecialAccessActions.Door = SpecialAccessActions.Door.PACKAGE,
         var sharing: List<String> = listOf(APP),
         var packageMode: Int = 0,
+        /** The package entry as stored, which is not the effective answer. */
+        var packageEntry: Int = 0,
         var uidModeValue: Int = 3,
         override val isSupported: Boolean = true,
         /** When set, the write is swallowed so the read-back sees no change. */
@@ -39,6 +41,7 @@ class SpecialAccessActionsTest {
         override fun packagesSharingUid(uid: Int) = sharing
         override fun mode(code: Int, uid: Int, packageName: String) = packageMode
         override fun uidMode(code: Int, uid: Int) = uidModeValue
+        override fun packageMode(code: Int, uid: Int, packageName: String) = packageEntry
         override fun door(code: Int, uid: Int) = door
 
         override fun setPackageMode(code: Int, uid: Int, packageName: String, mode: Int) {
@@ -183,19 +186,46 @@ class SpecialAccessActionsTest {
         assertEquals(0, attempt.previousUidState)
     }
 
+    /**
+     * Reversible means back to what it was, not back to permitted.
+     *
+     * An op held at uid level with no package entry has to come back that way:
+     * uid restored to its recorded value, package entry cleared to
+     * `MODE_DEFAULT`. Writing `MODE_ALLOWED` through the package door would
+     * leave state the phone never had - the residue found on a real app on
+     * 2026-09-14.
+     */
     @Test
-    fun `giving it back is the inverse and is recorded as its own kind`() {
-        val access = FakeAccess(packageMode = 1)
+    fun `giving it back restores both entries as they were, not as allowed`() {
+        val access = FakeAccess(packageMode = 1, packageEntry = 3, uidModeValue = 1)
         val (actions, log) = journalAnd(access)
 
-        actions.giveBack(APP, ALL_FILES)
+        actions.giveBack(APP, ALL_FILES, previousPackageMode = 3, previousUidMode = 0)
 
-        assertEquals(listOf("package:$APP:0"), access.writes)
+        assertEquals(listOf("uid:$UID:0", "package:$APP:3"), access.writes)
         assertEquals(ActionKind.GRANT_SPECIAL_ACCESS, log.entries.first().kind)
         assertEquals(
             ActionKind.GRANT_SPECIAL_ACCESS,
             ActionKind.REVOKE_SPECIAL_ACCESS.undo,
         )
+    }
+
+    /** What is recorded is each stored entry, never the effective answer. */
+    @Test
+    fun `the recorded previous state is the package entry, not the effective mode`() {
+        val access = FakeAccess(
+            door = SpecialAccessActions.Door.UID,
+            packageMode = 0,   // effective: allowed
+            packageEntry = 3,  // but nothing stored against the package
+            uidModeValue = 0,
+        )
+        val (actions, log) = journalAnd(access)
+
+        actions.revoke(APP, ALL_FILES)
+
+        val attempt = log.entries.first()
+        assertEquals("the package entry, not the effective mode", 3, attempt.previousState)
+        assertEquals(0, attempt.previousUidState)
     }
 
     @Test

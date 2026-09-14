@@ -129,11 +129,75 @@ internal object AppOpsWriter {
     fun doorFor(code: Int, uid: Int): Door =
         if (uidMode(code, uid) != MODE_DEFAULT) Door.UID else Door.PACKAGE
 
-    /** The uid entry alone, ignoring any package entry. */
-    fun uidMode(code: Int, uid: Int): Int =
-        PrivilegedBinder.invokeHidden(
-            Class.forName(APP_OPS_INTERFACE), service(), "checkOperation", code, uid, null,
-        ) as? Int ?: MODE_DEFAULT
+    /**
+     * The uid entry alone, ignoring any package entry.
+     *
+     * **Not `checkOperation(code, uid, null)`.** That was the first attempt and
+     * it is not a uid read at all - it answered `MODE_IGNORED` for every app on
+     * 2026-09-14, which made [doorFor] say `UID` universally and sent a
+     * package-held op through the wide door. It is also what wrote a garbage
+     * `previous_uid_state` into the log.
+     *
+     * `getUidOps` asks the question directly: the ops recorded **against the
+     * uid**, with no package involved. An empty answer is the ordinary case and
+     * means `MODE_DEFAULT` - no uid entry, so the package entry governs.
+     */
+    @Suppress("UNCHECKED_CAST")
+    fun uidMode(code: Int, uid: Int): Int {
+        val uidOps = runCatching {
+            PrivilegedBinder.invokeHidden(
+                Class.forName(APP_OPS_INTERFACE), service(), "getUidOps", uid, intArrayOf(code),
+            ) as? List<Any>
+        }.getOrNull() ?: return MODE_DEFAULT
+
+        uidOps.forEach { packageOps ->
+            val entries = runCatching {
+                PrivilegedBinder.invokeHidden(packageOps.javaClass, packageOps, "getOps")
+                    as? List<Any>
+            }.getOrNull().orEmpty()
+            entries.forEach { entry ->
+                val mode = runCatching {
+                    PrivilegedBinder.invokeHidden(entry.javaClass, entry, "getMode") as? Int
+                }.getOrNull()
+                if (mode != null) return mode
+            }
+        }
+        return MODE_DEFAULT
+    }
+
+    /**
+     * The **package** entry alone, ignoring any uid entry.
+     *
+     * The counterpart to [uidMode], and needed for the same reason: a faithful
+     * undo has to put back each entry as it found it. [mode] returns the
+     * *effective* answer, which is the wrong thing to record - restoring an
+     * effective value through the package door writes state the phone never
+     * had, which is exactly the residue left on a real app on 2026-09-14.
+     *
+     * Empty means no package entry, which is `MODE_DEFAULT`.
+     */
+    @Suppress("UNCHECKED_CAST")
+    fun packageMode(code: Int, uid: Int, packageName: String): Int {
+        val packageOps = runCatching {
+            PrivilegedBinder.invokeHidden(
+                Class.forName(APP_OPS_INTERFACE), service(), "getOpsForPackage",
+                uid, packageName, intArrayOf(code),
+            ) as? List<Any>
+        }.getOrNull() ?: return MODE_DEFAULT
+
+        packageOps.forEach { ops ->
+            val entries = runCatching {
+                PrivilegedBinder.invokeHidden(ops.javaClass, ops, "getOps") as? List<Any>
+            }.getOrNull().orEmpty()
+            entries.forEach { entry ->
+                val mode = runCatching {
+                    PrivilegedBinder.invokeHidden(entry.javaClass, entry, "getMode") as? Int
+                }.getOrNull()
+                if (mode != null) return mode
+            }
+        }
+        return MODE_DEFAULT
+    }
 
     fun setPackageMode(code: Int, uid: Int, packageName: String, mode: Int) {
         PrivilegedBinder.invokeHidden(

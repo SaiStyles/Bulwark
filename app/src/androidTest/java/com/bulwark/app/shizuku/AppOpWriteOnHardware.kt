@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -264,6 +265,65 @@ class AppOpWriteOnHardware {
             AppOpsManager.MODE_IGNORED,
             afterUidWrite,
         )
+    }
+
+    /**
+     * **Reading the uid entry, against a known case of each kind.**
+     *
+     * The check that would have caught the bug this file's first version
+     * shipped: `checkOperation(code, uid, null)` answered `MODE_IGNORED` for
+     * every app, so `doorFor` said `UID` universally and a package-held op took
+     * the wide door.
+     *
+     * A single app could not have exposed that - it needs one of each, and the
+     * Agni 2 has both. `com.brave.browser` holds install-unknown-apps at
+     * package level and prints no `Uid mode:` line at all. `com.binance.dev`
+     * was given a uid entry by Bulwark itself on 2026-09-14.
+     *
+     * Skips rather than asserting when the phone is not in that state, because
+     * this pins a mechanism and must not fail for being run somewhere else.
+     */
+    @Test
+    fun theUidEntryIsReadSeparatelyFromThePackageEntry() {
+        requireShizuku()
+
+        val overlay = AppOpsWriter.opCode("android:system_alert_window")
+        val install = AppOpsWriter.opCode("android:request_install_packages")
+
+        val braveUid = runCatching { AppOpsWriter.uidOf("com.brave.browser") }.getOrNull()
+        assumeTrue("SKIPPED: com.brave.browser is not on this phone", braveUid != null)
+
+        // Package-held: no uid entry, so the uid read must say DEFAULT and the
+        // door must be the narrow one.
+        assumeTrue(
+            "SKIPPED: brave does not hold install-unknown-apps here",
+            AppOpsWriter.mode(install, braveUid!!, "com.brave.browser") == AppOpsWriter.MODE_ALLOWED,
+        )
+        assertEquals(
+            "a package-held op must read as having no uid entry",
+            AppOpsWriter.MODE_DEFAULT,
+            AppOpsWriter.uidMode(install, braveUid),
+        )
+        assertEquals(
+            AppOpsWriter.Door.PACKAGE,
+            AppOpsWriter.doorFor(install, braveUid),
+        )
+
+        val binanceUid = runCatching { AppOpsWriter.uidOf("com.binance.dev") }.getOrNull()
+        assumeTrue("SKIPPED: com.binance.dev is not on this phone", binanceUid != null)
+
+        // Uid-held: Bulwark put this entry there, so the uid read must see it.
+        val binanceUidMode = AppOpsWriter.uidMode(overlay, binanceUid!!)
+        assumeTrue(
+            "SKIPPED: binance has no uid entry for overlay on this phone",
+            binanceUidMode != AppOpsWriter.MODE_DEFAULT,
+        )
+        assertEquals(
+            "a uid entry that exists must be read, not reported as default",
+            AppOpsWriter.MODE_IGNORED,
+            binanceUidMode,
+        )
+        assertEquals(AppOpsWriter.Door.UID, AppOpsWriter.doorFor(overlay, binanceUid))
     }
 
     // -- the plumbing, duplicated here on purpose (see the class note) --------

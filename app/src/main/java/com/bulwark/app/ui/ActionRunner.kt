@@ -233,6 +233,8 @@ class ActionRunner(
     fun giveBackSpecialAccess(
         packageName: String,
         opName: String,
+        previousPackageMode: Int,
+        previousUidMode: Int,
         onOutcome: (Outcome) -> Unit,
     ) {
         val label = Access.entries.firstOrNull { it.opName == opName }?.shortLabel ?: opName
@@ -242,7 +244,7 @@ class ActionRunner(
                 "Bulwark made.",
             onOutcome = onOutcome,
         ) {
-            specialAccess.giveBack(packageName, opName)
+            specialAccess.giveBack(packageName, opName, previousPackageMode, previousUidMode)
             "Gave ${label.lowercase()} back to $packageName."
         }
     }

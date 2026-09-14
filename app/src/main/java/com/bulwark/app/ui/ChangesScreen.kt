@@ -135,7 +135,7 @@ fun ChangesScreen(
             }
         }
 
-        items(list.orEmpty(), key = { "${it.kind}:${it.packageName}:${it.permission}:${it.appOp}" }) { change ->
+        items(list.orEmpty(), key = { "${it.kind}:${it.packageName}:${it.permission ?: it.appOp}" }) { change ->
             ChangeRow(change, result?.restorable.orEmpty(), runner, onOutcome)
             HorizontalDivider()
         }
@@ -261,6 +261,12 @@ private fun ChangeRow(
                         runner.giveBackSpecialAccess(
                             change.packageName,
                             change.appOp.orEmpty(),
+                            // MODE_DEFAULT when the log has no value: an older
+                            // row from before both entries were recorded. That
+                            // clears the entry rather than inventing a grant,
+                            // which is the safer wrong answer of the two.
+                            change.previousPackageMode ?: 3,
+                            change.previousUidMode ?: 3,
                             done,
                         )
                 }

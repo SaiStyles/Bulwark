@@ -73,6 +73,7 @@ class SpecialAccessActions(
         fun packagesSharingUid(uid: Int): List<String>
         fun mode(code: Int, uid: Int, packageName: String): Int
         fun uidMode(code: Int, uid: Int): Int
+        fun packageMode(code: Int, uid: Int, packageName: String): Int
         fun door(code: Int, uid: Int): Door
         fun setPackageMode(code: Int, uid: Int, packageName: String, mode: Int)
         fun setUidMode(code: Int, uid: Int, mode: Int)
@@ -87,6 +88,8 @@ class SpecialAccessActions(
         override fun mode(code: Int, uid: Int, packageName: String) =
             AppOpsWriter.mode(code, uid, packageName)
         override fun uidMode(code: Int, uid: Int) = AppOpsWriter.uidMode(code, uid)
+        override fun packageMode(code: Int, uid: Int, packageName: String) =
+            AppOpsWriter.packageMode(code, uid, packageName)
         override fun door(code: Int, uid: Int) = when (AppOpsWriter.doorFor(code, uid)) {
             AppOpsWriter.Door.UID -> Door.UID
             AppOpsWriter.Door.PACKAGE -> Door.PACKAGE
@@ -110,9 +113,44 @@ class SpecialAccessActions(
         write(packageName, opName, userId, AppOpsWriter.MODE_IGNORED, ActionKind.REVOKE_SPECIAL_ACCESS)
     }
 
-    /** Gives it back. The undo for [revoke]. */
-    fun giveBack(packageName: String, opName: String, userId: Int = 0) {
-        write(packageName, opName, userId, AppOpsWriter.MODE_ALLOWED, ActionKind.GRANT_SPECIAL_ACCESS)
+    /**
+     * Puts back exactly what was there. The undo for [revoke].
+     *
+     * Takes both recorded entries rather than assuming `MODE_ALLOWED`, because
+     * "reversible" means back to what it was and not back to permitted. An op
+     * the phone held at uid level with no package entry must come back that
+     * way; writing the effective value through the package door leaves state
+     * the phone never had, which is the residue this pair of columns exists to
+     * prevent.
+     */
+    fun giveBack(
+        packageName: String,
+        opName: String,
+        previousPackageMode: Int,
+        previousUidMode: Int,
+        userId: Int = 0,
+    ) {
+        CommandSafety.requireMutable(packageName)
+        check(access.isSupported) {
+            "This phone has no app-op interface Bulwark recognises, so it will not try."
+        }
+
+        val code = access.opCode(opName)
+        val uid = access.uidOf(packageName, userId)
+
+        journal.perform(
+            kind = ActionKind.GRANT_SPECIAL_ACCESS,
+            packageName = packageName,
+            userId = userId,
+            previousState = access.packageMode(code, uid, packageName),
+            previousUidState = access.uidMode(code, uid),
+            appOp = opName,
+        ) {
+            // Both entries, each back to what it was. Order does not matter -
+            // neither is read until the next `checkOperation`.
+            access.setUidMode(code, uid, previousUidMode)
+            access.setPackageMode(code, uid, packageName, previousPackageMode)
+        }
     }
 
     private fun write(
@@ -151,17 +189,19 @@ class SpecialAccessActions(
         // log is the thing a user is meant to be able to trust.
         if (before == target) return
 
-        // Both entries, because the undo has to put back what was actually
-        // there. Restoring only the effective mode through the wrong door
-        // leaves state the phone never had - which happened on hardware,
-        // 2026-09-14, before this was recorded.
+        // **Each entry as it stands, not the effective answer.** `before` above
+        // is what the platform resolves to; these two are what is actually
+        // stored, and only they can be put back faithfully. Recording the
+        // effective value here is what left residue on a real app on
+        // 2026-09-14.
+        val beforePackage = access.packageMode(code, uid, packageName)
         val beforeUid = access.uidMode(code, uid)
 
         journal.perform(
             kind = kind,
             packageName = packageName,
             userId = userId,
-            previousState = before,
+            previousState = beforePackage,
             previousUidState = beforeUid,
             appOp = opName,
         ) {
