@@ -654,9 +654,11 @@ fun AuditContent(
  * The part of this screen that no other app can show, and the reason the
  * copy leads with "Android has no setting for this" rather than with a count.
  *
- * Capped like the Activity cards: most apps hold these, so the list is long by
- * nature, and a list nobody reaches the end of informs nobody. The remainder is
- * stated rather than trimmed away.
+ * Capped at first sight like the Activity cards - most apps hold these, so the
+ * list is long by nature and a wall of rows informs nobody - but **the cap is a
+ * default, not a ceiling.** Every app holding a switch is reachable in one tap,
+ * because a count somebody cannot act on is a report and this card is meant to
+ * be a control.
  */
 @Composable
 private fun HiddenSwitchCard(
@@ -666,6 +668,10 @@ private fun HiddenSwitchCard(
     busy: Pair<String, HiddenSwitch>?,
     onRevoke: (HiddenSwitchHolder, HiddenSwitch) -> Unit,
 ) {
+    // Collapsed by default and saved across rotation, the same way
+    // `CollapsibleAudit` above does it - one idiom on this screen, not two.
+    var expanded by rememberSaveable { mutableStateOf(false) }
+
     Card {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
@@ -700,7 +706,8 @@ private fun HiddenSwitchCard(
                     hiddenSwitchDetail(holders)?.let {
                         Text(it, style = MaterialTheme.typography.bodySmall)
                     }
-                    holders.take(HIDDEN_SWITCH_ROWS).forEach { holder ->
+                    val shown = if (expanded) holders else holders.take(HIDDEN_SWITCH_ROWS)
+                    shown.forEach { holder ->
                         Text(
                             holder.packageName,
                             style = MaterialTheme.typography.bodyMedium,
@@ -719,11 +726,18 @@ private fun HiddenSwitchCard(
                             ) { Text(if (isBusy) "Taking it away…" else "Take this away") }
                         }
                     }
+                    // The remainder used to be *stated* here and left there:
+                    // "and 56 more apps", with no way to reach one of them. On
+                    // the Agni 2 that was 56 of 64 apps counted and not
+                    // actionable, which makes this card a report when its whole
+                    // reason to exist is being a control.
                     if (holders.size > HIDDEN_SWITCH_ROWS) {
-                        Text(
-                            "and ${holders.size - HIDDEN_SWITCH_ROWS} more apps",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
+                        TextButton(onClick = { expanded = !expanded }) {
+                            Text(
+                                if (expanded) "Show fewer"
+                                else "Show all ${holders.size} apps",
+                            )
+                        }
                     }
                 }
             }
@@ -731,7 +745,7 @@ private fun HiddenSwitchCard(
     }
 }
 
-/** A screenful. The remainder is always stated, never trimmed away. */
+/** A screenful, and where "Show all N apps" appears. Never a ceiling. */
 private const val HIDDEN_SWITCH_ROWS = 8
 
 /**

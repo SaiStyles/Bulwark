@@ -241,6 +241,60 @@ class AuditContentTest {
         compose.onNodeWithText("worth a second look", substring = true).assertIsDisplayed()
     }
 
+    /**
+     * **The gap this card shipped with.** It listed eight apps, said "and 56
+     * more apps", and offered no way to reach any of them - on the Agni 2, 56
+     * of 64 apps were counted and could not be acted on. A count you cannot
+     * act on is a report, and this card exists to be a control.
+     *
+     * Asserts the ninth is genuinely absent first, with the first as a
+     * known-present anchor, so it cannot pass against a blank card.
+     */
+    @Test
+    fun everyAppHoldingASwitchCanBeReached() {
+        render(fullyLoaded().copy(hiddenSwitches = manyHolders(12)))
+
+        // Anchor: the card rendered and the early rows are there.
+        scrollTo("com.example.holder01")
+        compose.onNodeWithText("com.example.holder01").assertIsDisplayed()
+        // The tail is not reachable yet.
+        compose.onAllNodesWithText("com.example.holder12").assertCountEquals(0)
+
+        scrollTo("Show all 12 apps")
+        compose.onNodeWithText("Show all 12 apps").performClick()
+
+        scrollTo("com.example.holder12")
+        compose.onNodeWithText("com.example.holder12").assertIsDisplayed()
+    }
+
+    /** Expanded is a view, not a one-way door. */
+    @Test
+    fun theExpandedListCanBeCollapsedAgain() {
+        render(fullyLoaded().copy(hiddenSwitches = manyHolders(12)))
+
+        scrollTo("Show all 12 apps")
+        compose.onNodeWithText("Show all 12 apps").performClick()
+        scrollTo("Show fewer")
+        compose.onNodeWithText("Show fewer").performClick()
+
+        scrollTo("com.example.holder01")
+        compose.onNodeWithText("com.example.holder01").assertIsDisplayed()
+        compose.onAllNodesWithText("com.example.holder12").assertCountEquals(0)
+    }
+
+    /**
+     * A card whose rows all fit says nothing about showing more - an expand
+     * control over a complete list is a control that does nothing.
+     */
+    @Test
+    fun aCardThatAlreadyFitsOffersNoExpandControl() {
+        render(fullyLoaded().copy(hiddenSwitches = manyHolders(3)))
+
+        scrollTo("com.example.holder03")
+        compose.onNodeWithText("com.example.holder03").assertIsDisplayed()
+        compose.onAllNodesWithText("Show all", substring = true).assertCountEquals(0)
+    }
+
     @Test
     fun theFirewallCardAppearsOnlyWhenARuleExists() {
         render(fullyLoaded().copy(blockedApps = emptySet()))
@@ -269,6 +323,16 @@ class AuditContentTest {
             }
         }
     }
+
+    /** [count] apps holding clipboard read, named so order is checkable. */
+    private fun manyHolders(count: Int): List<HiddenSwitchHolder> =
+        (1..count).map {
+            HiddenSwitchHolder(
+                packageName = "com.example.holder%02d".format(it),
+                switches = setOf(HiddenSwitch.READ_CLIPBOARD),
+                isSystem = false,
+            )
+        }
 
     /** Scrolls the audit's list until the node is composed, or fails trying. */
     private fun scrollTo(text: String) {
