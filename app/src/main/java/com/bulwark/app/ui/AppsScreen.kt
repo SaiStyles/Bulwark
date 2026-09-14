@@ -344,15 +344,22 @@ fun AppsContent(
 private fun SummaryCard(s: PackageCatalog.Summary) {
     Card {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            // **Four counts, each from a different question.** There were five,
+            // and two of them were the same number: `offered` and
+            // `uninstallable` both count "not on the never-remove list", because
+            // `canDisable` and `canUninstall` are unconditionally true for
+            // everything else. The screen printed 366 twice in different words.
+            //
+            // The second one also credited the community database with a
+            // verdict it never gave - "the database also rates safe to remove
+            // entirely" - while the line below it said 119 of those packages are
+            // undocumented. A database cannot have rated 366 things it has no
+            // entry for. The rating it *does* give is per package and is shown
+            // on the row, which is where a rating belongs.
             Text("${s.total} packages installed", style = MaterialTheme.typography.titleMedium)
-            Text("${s.offered} you can switch off — reversible, data kept")
-            // Says what is KNOWN, not what is offered. Bulwark cannot uninstall
-            // yet, and a count that reads as an offer is a promise the app does
-            // not keep. "Safe" was our word too; the rating belongs to the
-            // community database, so say whose it is.
-            Text("${s.uninstallable} the database also rates safe to remove entirely")
+            Text("${s.offered} Bulwark will act on — switching off is reversible and keeps data")
             Text("${s.refused} Bulwark refuses — they break your way back")
-            Text("${s.unknown} nobody has documented — still offered, and shown as unknown")
+            Text("${s.unknown} of those nobody has documented — still offered, and shown as unknown")
             Text(
                 "Package data snapshot ${UadDatabase.SNAPSHOT}, from the Universal " +
                     "Debloater Alliance. Bundled, not downloaded — Bulwark makes " +
