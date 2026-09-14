@@ -42,11 +42,30 @@ import rikka.shizuku.SystemServiceHelper
  *
  * One op, on one pre-approved package, restored in a `finally`.
  *
- * `com.android.egg` is the Android easter egg. It holds no overlay op - the
- * phone reports "Default mode: default" - and it has no use for one, so
- * setting `SYSTEM_ALERT_WINDOW` to `MODE_IGNORED` changes nothing anybody
- * relies on. The value is read first and put back afterwards, and the restore
- * is asserted rather than hoped for.
+ * `com.android.egg` is the Android easter egg, pre-approved for testing. The
+ * op is `VIBRATE`, which is about as inert as an op gets. The value is read
+ * first and put back afterwards, and the restore is asserted rather than hoped
+ * for.
+ *
+ * ## Why not `SYSTEM_ALERT_WINDOW`, which is what the layer actually wants
+ *
+ * It was the first choice and it produced a **false negative**, 2026-09-14:
+ * `setMode` returned without throwing and `checkOperation` still read
+ * `MODE_DEFAULT`. That looks exactly like "app ops cannot be written through
+ * our binder", and it is not.
+ *
+ * `cmd appops set com.android.egg SYSTEM_ALERT_WINDOW ignore` - **shell
+ * itself, no Bulwark involved** - does the same nothing, while `VIBRATE` on
+ * the same package sets and reads back cleanly. So the refusal belongs to that
+ * op on that package, not to the mechanism. The egg is a `SYSTEM` app that
+ * never requests the overlay permission, and the platform does not persist an
+ * overlay mode for a package with no claim to one.
+ *
+ * The instrument was very nearly blamed for the reading, again
+ * (`_shared/lessons/instrument.md`). **The discriminator was asking the phone
+ * the same question a different way** - if shell cannot do it either, it was
+ * never ours. Whether the four special-access ops are writable *on packages
+ * that hold them* is a separate question and is not answered here.
  *
  * **A no-op write would prove nothing.** Writing the value it already has
  * could "succeed" without anything happening, so this writes a *different*
@@ -61,8 +80,16 @@ import rikka.shizuku.SystemServiceHelper
 class AppOpWriteOnHardware {
 
     private companion object {
-        /** Pre-approved for testing, and holds no overlay op to begin with. */
+        /** Pre-approved for testing. */
         const val TARGET = "com.android.egg"
+
+        /**
+         * There is no `OPSTR_VIBRATE`, so the platform's own op string is used
+         * directly - the same approach `AppOpsAccess` takes for the two special
+         * accesses with no public constant. The *string* is the stable part;
+         * the int codes are what get reordered between releases.
+         */
+        const val VIBRATE = "android:vibrate"
 
         const val APP_OPS_INTERFACE = "com.android.internal.app.IAppOpsService"
         const val APP_OPS_STUB = "com.android.internal.app.IAppOpsService\$Stub"
@@ -94,7 +121,7 @@ class AppOpWriteOnHardware {
         requireDeliberateRun()
 
         val service = appOpsService()
-        val code = opCode(AppOpsManager.OPSTR_SYSTEM_ALERT_WINDOW)
+        val code = opCode(VIBRATE)
         val uid = privilegedUidOf(TARGET)
 
         val before = checkOperation(service, code, uid, TARGET)
