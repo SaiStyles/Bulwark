@@ -40,6 +40,7 @@ import com.bulwark.app.permissions.AppAccess
 import com.bulwark.app.permissions.AuditSummary
 import com.bulwark.app.permissions.HiddenSwitch
 import com.bulwark.app.permissions.HiddenSwitchHolder
+import com.bulwark.app.security.AddedCertificates
 import com.bulwark.app.permissions.hiddenSwitchDetail
 import com.bulwark.app.permissions.hiddenSwitchHeadline
 import com.bulwark.app.shizuku.AppOpsAccess
@@ -96,6 +97,11 @@ data class AuditReadings(
     val hiddenSwitchesCouldNotTell: String?,
     /** Which hidden switch is mid-change. */
     val revokingSwitch: Pair<String, HiddenSwitch>?,
+    /**
+     * Certificate authorities somebody added. Null until the read lands;
+     * **empty is a real answer here**, and a good one.
+     */
+    val addedCertificates: List<AddedCertificates.Added>?,
     val wirelessDebuggingOn: Boolean,
     val interrupted: List<ActionRecord>,
     /** Null means no read produced a list; the screen says something different for each. */
@@ -150,6 +156,7 @@ fun AuditScreen(
     var accessUnavailable by remember { mutableStateOf<List<String>>(emptyList()) }
     var ratSignals by remember { mutableStateOf<List<RatFinding>>(emptyList()) }
     var revoking by remember { mutableStateOf<Pair<String, Access>?>(null) }
+    var addedCertificates by remember { mutableStateOf<List<AddedCertificates.Added>?>(null) }
     var hiddenSwitches by remember { mutableStateOf<List<HiddenSwitchHolder>?>(null) }
     var hiddenSwitchesCouldNotTell by remember { mutableStateOf<String?>(null) }
     var revokingSwitch by remember { mutableStateOf<Pair<String, HiddenSwitch>?>(null) }
@@ -249,6 +256,16 @@ fun AuditScreen(
         accessUnavailable = built.unavailable
         wirelessDebuggingOn = built.wirelessDebuggingOn
         ratSignals = built.rat
+    }
+
+    // The trust store. **Not gated on Shizuku**, and that is the point of it:
+    // `AndroidCAStore` is readable by any app, so this is the one audit that
+    // works on first launch before anybody has been asked to set anything up.
+    // Still off the main thread - it parses every certificate on the phone.
+    LaunchedEffect(reload) {
+        addedCertificates = withContext(Dispatchers.IO) {
+            runCatching { AddedCertificates.read() }.getOrNull()
+        }
     }
 
     // The switches Android gives no screen for. Needs Shizuku: these are app
@@ -374,6 +391,7 @@ fun AuditScreen(
             hiddenSwitches = hiddenSwitches,
             hiddenSwitchesCouldNotTell = hiddenSwitchesCouldNotTell,
             revokingSwitch = revokingSwitch,
+            addedCertificates = addedCertificates,
             wirelessDebuggingOn = wirelessDebuggingOn,
             interrupted = interrupted,
             permissionGroups = permissionGroups,
@@ -409,6 +427,28 @@ fun AuditScreen(
             }
         },
         onOpenVpnSettings = { runCatching { context.startActivity(Firewall.vpnSettings()) } },
+        // Two intents, most specific first. The trusted-credentials screen is
+        // the one worth landing on, but its action is Settings' own and not
+        // framework API, so an OEM may not answer it; `ACTION_SECURITY_SETTINGS`
+        // is public and always does. Falling back beats a dead button, and
+        // saying where to look beats both if neither opens.
+        onOpenCertificateSettings = {
+            val direct = Intent("com.android.settings.TRUSTED_CREDENTIALS_USER")
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val fallback = Intent(Settings.ACTION_SECURITY_SETTINGS)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            runCatching { context.startActivity(direct) }
+                .recoverCatching { context.startActivity(fallback) }
+                .onFailure {
+                    report(
+                        ActionRunner.Outcome.Failed(
+                            "Bulwark could not open that screen on this phone. " +
+                                "It is under Settings, Security, Encryption & " +
+                                "credentials, Trusted credentials, User.",
+                        ),
+                    )
+                }
+        },
         onAllowVpn = { runner.requestVpnConsent() },
         onOpenShizuku = {
             // Bulwark cannot stop the server - Shizuku refuses "exit" from
@@ -494,6 +534,7 @@ fun AuditContent(
     onRevokeAccess: (AppAccess, Access) -> Unit,
     onRevokeSwitch: (HiddenSwitchHolder, HiddenSwitch) -> Unit,
     onOpenVpnSettings: () -> Unit,
+    onOpenCertificateSettings: () -> Unit,
     onAllowVpn: () -> Unit,
     onOpenShizuku: () -> Unit,
     onOpenDeveloperOptions: () -> Unit,
@@ -559,6 +600,20 @@ fun AuditContent(
                             modifier = Modifier.padding(vertical = 8.dp),
                         )
                     }
+                }
+
+                // **Above special access**, which is the only card that
+                // outranks it, because this is the one audit that does not need
+                // Shizuku: on first launch it is the only thing on this screen
+                // with an answer, and a screen whose top two cards both say
+                // "start Shizuku" teaches people the screen is empty.
+                //
+                // Slot emitted from first composition, like every card here.
+                item(key = "added-certificates") {
+                    AddedCertificateCard(
+                        added = readings.addedCertificates,
+                        onOpenSettings = onOpenCertificateSettings,
+                    )
                 }
 
                 // Below special access on purpose. That card names rare,
@@ -661,6 +716,64 @@ fun AuditContent(
  * because a count somebody cannot act on is a report and this card is meant to
  * be a control.
  */
+/**
+ * Certificate authorities somebody added, and the screen that can remove them.
+ *
+ * **No action button, on purpose.** Bulwark cannot remove one of these and
+ * neither can Shizuku - `/data/misc/user/0/cacerts-added/` refuses even a
+ * listing at uid 2000. So the control here opens Android's own screen, and its
+ * label says that is what it does rather than implying Bulwark will act.
+ */
+@Composable
+private fun AddedCertificateCard(
+    added: List<AddedCertificates.Added>?,
+    onOpenSettings: () -> Unit,
+) {
+    val now = remember { System.currentTimeMillis() }
+
+    Card {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                "Certificates someone added",
+                style = MaterialTheme.typography.titleMedium,
+            )
+
+            if (added == null) {
+                Text("Checking…", style = MaterialTheme.typography.bodySmall)
+                return@Column
+            }
+
+            Text(
+                AddedCertificates.headline(added),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            AddedCertificates.detail(added)?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall)
+            }
+
+            added.forEach { cert ->
+                Text(
+                    cert.label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+                Text(
+                    AddedCertificates.line(cert, now),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+
+            // Only where there is something to act on. An empty store needs no
+            // signpost - design.md rule 5, and offering one would imply there
+            // is something to go and look at.
+            if (added.isNotEmpty()) {
+                TextButton(onClick = onOpenSettings) { Text("Open certificate settings") }
+            }
+        }
+    }
+}
+
 @Composable
 private fun HiddenSwitchCard(
     holders: List<HiddenSwitchHolder>?,

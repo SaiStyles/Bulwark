@@ -19,6 +19,7 @@ import com.bulwark.app.permissions.HiddenSwitchHolder
 import com.bulwark.app.permissions.PermissionAcrossApps
 import com.bulwark.app.permissions.PermissionHolding
 import com.bulwark.app.permissions.RatFinding
+import com.bulwark.app.security.AddedCertificates
 import com.bulwark.app.permissions.audit
 import com.bulwark.app.permissions.summarise
 import com.bulwark.app.policy.ActionKind
@@ -136,6 +137,7 @@ class AuditContentTest {
                     onRevokeAccess = { _, _ -> },
                     onRevokeSwitch = { _, _ -> },
                     onOpenVpnSettings = {},
+                    onOpenCertificateSettings = {},
                     onAllowVpn = {},
                     onOpenShizuku = {},
                     onOpenDeveloperOptions = {},
@@ -180,6 +182,7 @@ class AuditContentTest {
                     onRevokeAccess = { app, access -> tapped += "${app.packageName}:$access" },
                     onRevokeSwitch = { _, _ -> },
                     onOpenVpnSettings = {},
+                    onOpenCertificateSettings = {},
                     onAllowVpn = {},
                     onOpenShizuku = {},
                     onOpenDeveloperOptions = {},
@@ -313,6 +316,52 @@ class AuditContentTest {
         compose.onAllNodesWithText("What apps can do").assertCountEquals(0)
     }
 
+    /**
+     * The one card on this screen that works with Shizuku down.
+     *
+     * `AndroidCAStore` needs no privilege, so on first launch this is the only
+     * thing here with an answer. If it ever starts depending on Shizuku, the
+     * whole reason it sits at the top of the screen is gone.
+     */
+    @Test
+    fun theCertificateCardStillAnswersWithoutShizuku() {
+        render(
+            fullyLoaded().copy(
+                shizukuReady = false,
+                addedCertificates = listOf(INTERCEPTION_CA),
+            ),
+        )
+
+        scrollTo("been added to this phone")
+        compose.onNodeWithText("1 certificate authority has been added to this phone.")
+            .assertIsDisplayed()
+        compose.onNodeWithText("Bulwark Test Interception CA").assertIsDisplayed()
+    }
+
+    /**
+     * An empty store is good news and is allowed to say so - the opposite of
+     * the hidden switches card, where empty means the read is suspect.
+     */
+    @Test
+    fun anEmptyCertificateStoreIsStatedPlainlyAsGoodNews() {
+        render(fullyLoaded().copy(addedCertificates = emptyList()))
+
+        scrollTo("Nobody has added a certificate")
+        compose.onNodeWithText("Nobody has added a certificate authority to this phone.")
+            .assertIsDisplayed()
+        // Nothing to go and look at, so no signpost.
+        compose.onAllNodesWithText("Open certificate settings").assertCountEquals(0)
+    }
+
+    /** Where there is something to act on, the way to act is Android's screen. */
+    @Test
+    fun aFoundCertificateOffersTheSettingsScreenBulwarkCannotReplace() {
+        render(fullyLoaded().copy(addedCertificates = listOf(INTERCEPTION_CA)))
+
+        scrollTo("Open certificate settings")
+        compose.onNodeWithText("Open certificate settings").assertIsDisplayed()
+    }
+
     @Test
     fun theFirewallCardAppearsOnlyWhenARuleExists() {
         render(fullyLoaded().copy(blockedApps = emptySet()))
@@ -332,6 +381,7 @@ class AuditContentTest {
                     onRevokeAccess = { _, _ -> },
                     onRevokeSwitch = { _, _ -> },
                     onOpenVpnSettings = {},
+                    onOpenCertificateSettings = {},
                     onAllowVpn = {},
                     onOpenShizuku = {},
                     onOpenDeveloperOptions = {},
@@ -341,6 +391,14 @@ class AuditContentTest {
             }
         }
     }
+
+    /** A self-signed root of the shape a debugging proxy or an MDM leaves. */
+    private val INTERCEPTION_CA = AddedCertificates.Added(
+        label = "Bulwark Test Interception CA",
+        issuedBy = "Bulwark Test Interception CA",
+        expiresAt = Long.MAX_VALUE,
+        selfSigned = true,
+    )
 
     /** [count] apps holding clipboard read, named so order is checkable. */
     private fun manyHolders(count: Int): List<HiddenSwitchHolder> =
@@ -387,6 +445,7 @@ class AuditContentTest {
             ),
             hiddenSwitchesCouldNotTell = null,
             revokingSwitch = null,
+            addedCertificates = emptyList(),
             ratSignals = listOf(
                 RatFinding(
                     headline = "Something can watch your screen and hide itself",
