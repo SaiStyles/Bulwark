@@ -101,6 +101,25 @@ internal object AppOpsAccess {
      *   rather than returning an empty map - "nothing holds these" and "we
      *   could not ask" must never look the same on screen.
      */
+    /**
+     * Packages holding any of [opNames], by op string.
+     *
+     * The generic form of [holders], added 2026-09-14 when a second caller
+     * appeared for the ops with no Settings screen. One implementation rather
+     * than two: this path took four bugs to get right and a copy of it would
+     * be a copy of those bugs waiting to diverge.
+     */
+    fun holdersOfOps(opNames: Set<String>): Map<String, Set<String>> {
+        val opsClass = Class.forName("android.app.AppOpsManager")
+        val byCode: Map<Int, String> = opNames.mapNotNull { name ->
+            runCatching {
+                PrivilegedBinder.invokeHidden(opsClass, null, "strOpToOp", name) as? Int
+            }.getOrNull()?.let { it to name }
+        }.toMap()
+        if (byCode.isEmpty()) error("No known app ops to query on this platform")
+        return read(byCode)
+    }
+
     @Suppress("UNCHECKED_CAST")
     fun holders(): Map<String, Set<Access>> {
         val opsClass = Class.forName("android.app.AppOpsManager")
@@ -124,9 +143,35 @@ internal object AppOpsAccess {
             "getPackagesForOps", byCode.keys.toIntArray(),
         ) as? List<Any> ?: return emptyMap()
 
-        val codeFor: Map<Access, Int> = byCode.entries.associate { it.value to it.key }
+        // Keyed by the **op string**, not the enum name, so the `getOpStr`
+        // path below still matches. Falling through to the int codes would
+        // work and would quietly give up the one part of this that does not
+        // depend on codes being stable between releases.
+        return read(byCode.mapValues { it.value.opName.orEmpty() })
+            .mapValues { (_, ops) -> ops.mapNotNull { WANTED[it] }.toSet() }
+    }
 
-        val result = mutableMapOf<String, MutableSet<Access>>()
+    /**
+     * The read itself, keyed by op code, answering in whatever the caller
+     * named each code.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun read(byCode: Map<Int, String>): Map<String, Set<String>> {
+        val binder = SystemServiceHelper.getSystemService("appops")
+            ?: error("App ops service is unavailable")
+        val service = PrivilegedBinder.invokeHidden(
+            Class.forName(APP_OPS_STUB), null, "asInterface", ShizukuBinderWrapper(binder),
+        ) ?: error("IAppOpsService.Stub.asInterface returned null")
+
+        val packageOps = PrivilegedBinder.invokeHidden(
+            Class.forName(APP_OPS_INTERFACE), service,
+            "getPackagesForOps", byCode.keys.toIntArray(),
+        ) as? List<Any> ?: return emptyMap()
+
+        val nameToCode: Map<String, Int> = byCode.entries.associate { it.value to it.key }
+        val known: Set<String> = byCode.values.toSet()
+
+        val result = mutableMapOf<String, MutableSet<String>>()
         packageOps.forEach { entry ->
             val pkg = PrivilegedBinder.invokeHidden(
                 entry.javaClass, entry, "getPackageName",
@@ -140,9 +185,9 @@ internal object AppOpsAccess {
                 // getOpStr() keeps the response in op *names*, so nothing here
                 // depends on the int codes that get reordered between
                 // releases. getOp() is the fallback for platforms without it.
-                val access = runCatching {
+                val named = runCatching {
                     PrivilegedBinder.invokeHidden(op.javaClass, op, "getOpStr") as? String
-                }.getOrNull()?.let { WANTED[it] }
+                }.getOrNull()?.takeIf { it in known }
                     ?: runCatching {
                         PrivilegedBinder.invokeHidden(op.javaClass, op, "getOp") as? Int
                     }.getOrNull()?.let { byCode[it] }
@@ -151,7 +196,7 @@ internal object AppOpsAccess {
                 // The effective mode, not the package entry this row carries.
                 // Falls back to the package entry only when the uid is unknown,
                 // which is a worse answer and is why it is the fallback.
-                val code = codeFor[access]
+                val code = nameToCode[named]
                 val effective = if (uid != null && code != null) {
                     runCatching { AppOpsWriter.mode(code, uid, pkg) }.getOrNull()
                 } else {
@@ -162,7 +207,7 @@ internal object AppOpsAccess {
                     ?: return@forEach
                 if (mode != MODE_ALLOWED) return@forEach
 
-                result.getOrPut(pkg) { mutableSetOf() } += access
+                result.getOrPut(pkg) { mutableSetOf() } += named
             }
         }
         return result.mapValues { it.value.toSet() }

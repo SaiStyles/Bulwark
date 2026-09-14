@@ -38,6 +38,11 @@ import com.bulwark.app.firewall.firewallState
 import com.bulwark.app.permissions.Access
 import com.bulwark.app.permissions.AppAccess
 import com.bulwark.app.permissions.AuditSummary
+import com.bulwark.app.permissions.HiddenSwitch
+import com.bulwark.app.permissions.HiddenSwitchHolder
+import com.bulwark.app.permissions.hiddenSwitchDetail
+import com.bulwark.app.permissions.hiddenSwitchHeadline
+import com.bulwark.app.shizuku.AppOpsAccess
 import com.bulwark.app.permissions.DeviceSignal
 import com.bulwark.app.permissions.PermissionAcrossApps
 import com.bulwark.app.permissions.RatFinding
@@ -58,6 +63,7 @@ import com.bulwark.app.shizuku.doneForNowHeadline
 import com.bulwark.app.shizuku.whatCanBeClosed
 import com.bulwark.app.ui.theme.CautionBackground
 import com.bulwark.app.ui.theme.CautionText
+import com.bulwark.app.ui.theme.Incomplete
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -84,6 +90,12 @@ data class AuditReadings(
     val ratSignals: List<RatFinding>,
     /** Which access is mid-change, so its control is not pressed twice. */
     val revoking: Pair<String, Access>?,
+    /** Apps holding an op Android gives no screen for. Null until the read lands. */
+    val hiddenSwitches: List<HiddenSwitchHolder>?,
+    /** Why the hidden-switch read produced nothing usable. */
+    val hiddenSwitchesCouldNotTell: String?,
+    /** Which hidden switch is mid-change. */
+    val revokingSwitch: Pair<String, HiddenSwitch>?,
     val wirelessDebuggingOn: Boolean,
     val interrupted: List<ActionRecord>,
     /** Null means no read produced a list; the screen says something different for each. */
@@ -138,6 +150,9 @@ fun AuditScreen(
     var accessUnavailable by remember { mutableStateOf<List<String>>(emptyList()) }
     var ratSignals by remember { mutableStateOf<List<RatFinding>>(emptyList()) }
     var revoking by remember { mutableStateOf<Pair<String, Access>?>(null) }
+    var hiddenSwitches by remember { mutableStateOf<List<HiddenSwitchHolder>?>(null) }
+    var hiddenSwitchesCouldNotTell by remember { mutableStateOf<String?>(null) }
+    var revokingSwitch by remember { mutableStateOf<Pair<String, HiddenSwitch>?>(null) }
     // Needs no privilege - Settings.Global, world-readable, which is also
     // why a rogue app can check it before deciding to use it.
     var wirelessDebuggingOn by remember { mutableStateOf(false) }
@@ -236,6 +251,35 @@ fun AuditScreen(
         ratSignals = built.rat
     }
 
+    // The switches Android gives no screen for. Needs Shizuku: these are app
+    // ops, and reading who holds one is the same privileged call as the rest.
+    LaunchedEffect(ready, reload) {
+        if (!ready) {
+            hiddenSwitches = null
+            hiddenSwitchesCouldNotTell = null
+            return@LaunchedEffect
+        }
+        val outcome = withContext(Dispatchers.IO) {
+            runCatching {
+                val byPackage = AppOpsAccess.holdersOfOps(HiddenSwitch.allOps)
+                val installed = runCatching { PrivilegedPackages.listDetailed() }.getOrNull()
+                val known = installed?.map { it.packageName }?.toSet()
+                val systemNames = installed?.filter { it.isSystem }?.map { it.packageName }?.toSet()
+                byPackage.map { (pkg, ops) ->
+                    HiddenSwitchHolder(
+                        packageName = pkg,
+                        switches = ops.mapNotNull { HiddenSwitch.forOp(it) }.toSet(),
+                        isSystem = SpecialAccessReader.isSystem(context, pkg, systemNames, known),
+                    )
+                }.filter { it.switches.isNotEmpty() }.sortedBy { it.packageName }
+            }
+        }
+        hiddenSwitches = outcome.getOrNull()
+        hiddenSwitchesCouldNotTell = outcome.exceptionOrNull()?.let {
+            "Bulwark could not read which apps hold these: ${it.message}"
+        }
+    }
+
     // The log is a database, so this reads it off the main thread.
     LaunchedEffect(reload) {
         interrupted = withContext(Dispatchers.IO) {
@@ -327,6 +371,9 @@ fun AuditScreen(
             accessUnavailable = accessUnavailable,
             ratSignals = ratSignals,
             revoking = revoking,
+            hiddenSwitches = hiddenSwitches,
+            hiddenSwitchesCouldNotTell = hiddenSwitchesCouldNotTell,
+            revokingSwitch = revokingSwitch,
             wirelessDebuggingOn = wirelessDebuggingOn,
             interrupted = interrupted,
             permissionGroups = permissionGroups,
@@ -340,6 +387,16 @@ fun AuditScreen(
             lockdown = lockdown,
             shizukuReady = ready,
         ),
+        onRevokeSwitch = { holder, switch ->
+            revokingSwitch = holder.packageName to switch
+            runner.revokeAppOp(
+                holder.packageName, switch.opName, switch.shortLabel, switch.plainMeaning,
+            ) { outcome ->
+                revokingSwitch = null
+                report(outcome)
+                reload++
+            }
+        },
         onRevokeAccess = { app, access ->
             revoking = app.packageName to access
             runner.revokeSpecialAccess(app.packageName, access) { outcome ->
@@ -435,6 +492,7 @@ fun AuditScreen(
 fun AuditContent(
     readings: AuditReadings,
     onRevokeAccess: (AppAccess, Access) -> Unit,
+    onRevokeSwitch: (HiddenSwitchHolder, HiddenSwitch) -> Unit,
     onOpenVpnSettings: () -> Unit,
     onAllowVpn: () -> Unit,
     onOpenShizuku: () -> Unit,
@@ -500,6 +558,22 @@ fun AuditContent(
                             modifier = Modifier.padding(vertical = 8.dp),
                         )
                     }
+                }
+
+                // Below special access on purpose. That card names rare,
+                // dangerous capabilities and has to stay short enough to read;
+                // this one is held by most apps on the phone, so putting it
+                // above would bury the signal under the ordinary.
+                //
+                // Slot emitted from the first composition, like every card here.
+                item(key = "hidden-switches") {
+                    HiddenSwitchCard(
+                        holders = readings.hiddenSwitches,
+                        couldNotTell = readings.hiddenSwitchesCouldNotTell,
+                        shizukuReady = readings.shizukuReady,
+                        busy = readings.revokingSwitch,
+                        onRevoke = onRevokeSwitch,
+                    )
                 }
 
                 // Shown whenever there is anything to say, which is whenever a
@@ -573,6 +647,92 @@ fun AuditContent(
         }
     }
 }
+
+/**
+ * The switches Android does not give you.
+ *
+ * The part of this screen that no other app can show, and the reason the
+ * copy leads with "Android has no setting for this" rather than with a count.
+ *
+ * Capped like the Activity cards: most apps hold these, so the list is long by
+ * nature, and a list nobody reaches the end of informs nobody. The remainder is
+ * stated rather than trimmed away.
+ */
+@Composable
+private fun HiddenSwitchCard(
+    holders: List<HiddenSwitchHolder>?,
+    couldNotTell: String?,
+    shizukuReady: Boolean,
+    busy: Pair<String, HiddenSwitch>?,
+    onRevoke: (HiddenSwitchHolder, HiddenSwitch) -> Unit,
+) {
+    Card {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                "Switches Android does not give you",
+                style = MaterialTheme.typography.titleMedium,
+            )
+
+            when {
+                !shizukuReady -> Text(
+                    "Shizuku is not running. These are app ops, and reading who " +
+                        "holds one needs the access Shizuku provides.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Incomplete,
+                )
+
+                holders == null && couldNotTell != null -> Text(
+                    couldNotTell,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Incomplete,
+                )
+
+                holders == null -> Text(
+                    "Checking…",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+
+                else -> {
+                    Text(
+                        hiddenSwitchHeadline(holders),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    hiddenSwitchDetail(holders)?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall)
+                    }
+                    holders.take(HIDDEN_SWITCH_ROWS).forEach { holder ->
+                        Text(
+                            holder.packageName,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                        holder.switches.sortedBy { it.name }.forEach { switch ->
+                            Text(
+                                "• ${switch.plainMeaning}",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            val isBusy = busy == holder.packageName to switch
+                            TextButton(
+                                enabled = !isBusy,
+                                onClick = { onRevoke(holder, switch) },
+                            ) { Text(if (isBusy) "Taking it away…" else "Take this away") }
+                        }
+                    }
+                    if (holders.size > HIDDEN_SWITCH_ROWS) {
+                        Text(
+                            "and ${holders.size - HIDDEN_SWITCH_ROWS} more apps",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A screenful. The remainder is always stated, never trimmed away. */
+private const val HIDDEN_SWITCH_ROWS = 8
 
 /**
  * What the firewall is actually doing, as opposed to what was asked for.

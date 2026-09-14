@@ -18,6 +18,7 @@ import com.bulwark.app.permissions.singleRevokePrompt
 import com.bulwark.app.permissions.wordsFor
 import com.bulwark.app.policy.FirewallActions
 import com.bulwark.app.permissions.Access
+import com.bulwark.app.permissions.HiddenSwitch
 import com.bulwark.app.policy.PermissionActions
 import com.bulwark.app.policy.SpecialAccessActions
 import com.bulwark.app.security.DestructiveActionGuard
@@ -217,15 +218,32 @@ class ActionRunner(
             )
             return
         }
+        revokeAppOp(packageName, op, access.shortLabel, access.plainMeaning, onOutcome)
+    }
+
+    /**
+     * Authenticates, then takes one app op away - whatever it is.
+     *
+     * The general form. `Access` values and the switches Android gives no
+     * screen for are the same act underneath, and the prompt only needs a
+     * label and a sentence to say what is being given up.
+     */
+    fun revokeAppOp(
+        packageName: String,
+        opName: String,
+        label: String,
+        meaning: String,
+        onOutcome: (Outcome) -> Unit,
+    ) {
         authenticated(
-            title = "Take away ${access.shortLabel}",
+            title = "Take away $label",
             reason = "Stop $packageName being able to " +
-                "${access.plainMeaning.trimEnd('.').lowercase()}. The app keeps " +
-                "running and keeps its data, and you can give this back here.",
+                "${meaning.trimEnd('.').lowercase()}. The app keeps running and " +
+                "keeps its data, and you can give this back here.",
             onOutcome = onOutcome,
         ) {
-            specialAccess.revoke(packageName, op)
-            "Took ${access.shortLabel.lowercase()} away from $packageName."
+            specialAccess.revoke(packageName, opName)
+            "Took ${label.lowercase()} away from $packageName."
         }
     }
 
@@ -237,7 +255,9 @@ class ActionRunner(
         previousUidMode: Int,
         onOutcome: (Outcome) -> Unit,
     ) {
-        val label = Access.entries.firstOrNull { it.opName == opName }?.shortLabel ?: opName
+        val label = Access.entries.firstOrNull { it.opName == opName }?.shortLabel
+            ?: HiddenSwitch.forOp(opName)?.shortLabel
+            ?: opName
         authenticated(
             title = "Give $label back",
             reason = "Let $packageName have $label again, undoing the change " +

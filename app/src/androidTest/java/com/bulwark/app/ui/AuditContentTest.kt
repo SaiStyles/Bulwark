@@ -14,6 +14,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.bulwark.app.firewall.AlwaysOn
 import com.bulwark.app.permissions.Access
 import com.bulwark.app.permissions.AppAccess
+import com.bulwark.app.permissions.HiddenSwitch
+import com.bulwark.app.permissions.HiddenSwitchHolder
 import com.bulwark.app.permissions.PermissionAcrossApps
 import com.bulwark.app.permissions.PermissionHolding
 import com.bulwark.app.permissions.RatFinding
@@ -132,6 +134,7 @@ class AuditContentTest {
                 AuditContent(
                     readings = readings.value,
                     onRevokeAccess = { _, _ -> },
+                    onRevokeSwitch = { _, _ -> },
                     onOpenVpnSettings = {},
                     onAllowVpn = {},
                     onOpenShizuku = {},
@@ -170,8 +173,12 @@ class AuditContentTest {
                     readings = fullyLoaded().copy(
                         access = apps.audit(),
                         accessSummary = apps.summarise(),
+                        // Emptied so the only controls on screen belong to the
+                        // card under test - the hidden-switch card draws its own.
+                        hiddenSwitches = emptyList(),
                     ),
                     onRevokeAccess = { app, access -> tapped += "${app.packageName}:$access" },
+                    onRevokeSwitch = { _, _ -> },
                     onOpenVpnSettings = {},
                     onAllowVpn = {},
                     onOpenShizuku = {},
@@ -187,6 +194,51 @@ class AuditContentTest {
 
         compose.onNodeWithText("Take this away").performClick()
         assertEquals(listOf("com.example.overlay:DRAW_OVER_APPS"), tapped)
+    }
+
+    /**
+     * The card that exists because Settings has no screen for this. Asserted
+     * by the sentence that makes it worth showing, not by its title.
+     */
+    @Test
+    fun theHiddenSwitchCardSaysAndroidHasNoSettingForIt() {
+        render(fullyLoaded())
+
+        scrollTo("Android has no setting for this")
+        compose.onNodeWithText("Android has no setting for this", substring = true)
+            .assertIsDisplayed()
+        compose.onNodeWithText("1 app can read or change your clipboard.").assertIsDisplayed()
+    }
+
+    /** It reports; it does not accuse. Most apps hold these for ordinary reasons. */
+    @Test
+    fun theHiddenSwitchCardRefusesToAccuse() {
+        render(fullyLoaded())
+
+        scrollTo("ordinary reason to hold it")
+        compose.onNodeWithText("ordinary reason to hold it", substring = true)
+            .assertIsDisplayed()
+    }
+
+    /** Without Shizuku it says why, rather than showing an empty list. */
+    @Test
+    fun theHiddenSwitchCardSaysWhyItIsEmptyWithoutShizuku() {
+        render(fullyLoaded().copy(shizukuReady = false, hiddenSwitches = null))
+
+        scrollTo("reading who holds one")
+        compose.onNodeWithText("reading who holds one", substring = true).assertIsDisplayed()
+    }
+
+    /**
+     * Nothing holding one is *not* reassurance - every phone has apps that do,
+     * so an empty answer means the read is suspect rather than the phone clean.
+     */
+    @Test
+    fun anEmptyHiddenSwitchListIsTreatedAsSuspectNotAsGoodNews() {
+        render(fullyLoaded().copy(hiddenSwitches = emptyList()))
+
+        scrollTo("worth a second look")
+        compose.onNodeWithText("worth a second look", substring = true).assertIsDisplayed()
     }
 
     @Test
@@ -206,6 +258,7 @@ class AuditContentTest {
                 AuditContent(
                     readings = readings,
                     onRevokeAccess = { _, _ -> },
+                    onRevokeSwitch = { _, _ -> },
                     onOpenVpnSettings = {},
                     onAllowVpn = {},
                     onOpenShizuku = {},
@@ -243,6 +296,15 @@ class AuditContentTest {
             accessSummary = apps.summarise(),
             accessUnavailable = emptyList(),
             revoking = null,
+            hiddenSwitches = listOf(
+                HiddenSwitchHolder(
+                    packageName = "com.example.copier",
+                    switches = setOf(HiddenSwitch.READ_CLIPBOARD),
+                    isSystem = false,
+                ),
+            ),
+            hiddenSwitchesCouldNotTell = null,
+            revokingSwitch = null,
             ratSignals = listOf(
                 RatFinding(
                     headline = "Something can watch your screen and hide itself",
