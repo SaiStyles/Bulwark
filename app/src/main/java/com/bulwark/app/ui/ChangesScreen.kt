@@ -135,7 +135,7 @@ fun ChangesScreen(
             }
         }
 
-        items(list.orEmpty(), key = { "${it.kind}:${it.packageName}:${it.permission}" }) { change ->
+        items(list.orEmpty(), key = { "${it.kind}:${it.packageName}:${it.permission}:${it.appOp}" }) { change ->
             ChangeRow(change, result?.restorable.orEmpty(), runner, onOutcome)
             HorizontalDivider()
         }
@@ -257,20 +257,12 @@ private fun ChangeRow(
                     // than leaving a green tick over a gap.
                     ChangeKind.UNINSTALLED ->
                         runner.putBack(change.packageName, change.packageName, done)
-                    // **No undo exists yet.** The log kinds for special access
-                    // landed on 2026-09-14 ahead of the action that writes
-                    // them, so nothing can produce this row today and this
-                    // branch is unreachable. It reports rather than silently
-                    // doing nothing: a button that reads like it acted and did
-                    // not is the false sense of protection `safety-rules.md`
-                    // calls worse than none. Delete this the moment the revoke
-                    // ships with a working `giveBackSpecialAccess`.
-                    ChangeKind.SPECIAL_ACCESS_TAKEN -> done(
-                        ActionRunner.Outcome.Failed(
-                            "Bulwark cannot give this access back yet - the " +
-                                "action has not been built. Nothing was changed.",
-                        ),
-                    )
+                    ChangeKind.SPECIAL_ACCESS_TAKEN ->
+                        runner.giveBackSpecialAccess(
+                            change.packageName,
+                            change.appOp.orEmpty(),
+                            done,
+                        )
                 }
             },
         ) { Text(change.undoLabel()) }

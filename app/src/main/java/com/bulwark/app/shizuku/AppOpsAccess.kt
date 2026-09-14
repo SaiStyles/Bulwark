@@ -74,12 +74,8 @@ internal object AppOpsAccess {
      *
      * An op the platform does not recognise is skipped, never guessed.
      */
-    private val WANTED: Map<String, Access> = mapOf(
-        AppOpsManager.OPSTR_SYSTEM_ALERT_WINDOW to Access.DRAW_OVER_APPS,
-        AppOpsManager.OPSTR_GET_USAGE_STATS to Access.USAGE_ACCESS,
-        "android:manage_external_storage" to Access.ALL_FILES,
-        "android:request_install_packages" to Access.INSTALL_UNKNOWN_APPS,
-    )
+    private val WANTED: Map<String, Access> =
+        Access.entries.mapNotNull { access -> access.opName?.let { it to access } }.toMap()
 
     /** `MODE_ALLOWED`. Anything else is not a grant. */
     private const val MODE_ALLOWED = AppOpsManager.MODE_ALLOWED

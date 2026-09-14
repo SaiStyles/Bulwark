@@ -17,7 +17,9 @@ import com.bulwark.app.permissions.batchRevokePrompt
 import com.bulwark.app.permissions.singleRevokePrompt
 import com.bulwark.app.permissions.wordsFor
 import com.bulwark.app.policy.FirewallActions
+import com.bulwark.app.permissions.Access
 import com.bulwark.app.policy.PermissionActions
+import com.bulwark.app.policy.SpecialAccessActions
 import com.bulwark.app.security.DestructiveActionGuard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -62,6 +64,8 @@ class ActionRunner(
      * before it can exist at all.
      */
     private val firewall: FirewallActions,
+    /** The app-op half of the permissions layer. */
+    private val specialAccess: SpecialAccessActions,
     /**
      * Reads back what the phone says is switched off. Defaulted rather than
      * injected at the call site because there is one production implementation;
@@ -184,6 +188,63 @@ class ActionRunner(
     ) {
         actions.uninstall(packageName)
         if (canRestore) "Removed $label. You can put it back." else "Removed $label."
+    }
+
+    /**
+     * Authenticates, then takes one special access away from one app.
+     *
+     * The op behind an [Access] comes from `Access.opName`, so the prompt names
+     * what the person is giving up rather than an `android:` identifier.
+     * `SpecialAccessActions` refuses a shared uid before this runs.
+     */
+    fun revokeSpecialAccess(
+        packageName: String,
+        access: Access,
+        onOutcome: (Outcome) -> Unit,
+    ) {
+        val op = access.opName
+        if (op == null) {
+            // Accessibility, notification listening and device admin are
+            // enrolments Android keeps elsewhere, with no app op behind them.
+            // Bulwark can see them and cannot switch them off, and says so
+            // rather than offering something it cannot do.
+            onOutcome(
+                Outcome.Refused(
+                    "${access.shortLabel} is not something Bulwark can switch off. " +
+                        "Android keeps that one somewhere else, and only you can " +
+                        "turn it off in Settings.",
+                ),
+            )
+            return
+        }
+        authenticated(
+            title = "Take away ${access.shortLabel}",
+            reason = "Stop $packageName being able to " +
+                "${access.plainMeaning.trimEnd('.').lowercase()}. The app keeps " +
+                "running and keeps its data, and you can give this back here.",
+            onOutcome = onOutcome,
+        ) {
+            specialAccess.revoke(packageName, op)
+            "Took ${access.shortLabel.lowercase()} away from $packageName."
+        }
+    }
+
+    /** Authenticates, then gives it back. The undo for [revokeSpecialAccess]. */
+    fun giveBackSpecialAccess(
+        packageName: String,
+        opName: String,
+        onOutcome: (Outcome) -> Unit,
+    ) {
+        val label = Access.entries.firstOrNull { it.opName == opName }?.shortLabel ?: opName
+        authenticated(
+            title = "Give $label back",
+            reason = "Let $packageName have $label again, undoing the change " +
+                "Bulwark made.",
+            onOutcome = onOutcome,
+        ) {
+            specialAccess.giveBack(packageName, opName)
+            "Gave ${label.lowercase()} back to $packageName."
+        }
     }
 
     /** Authenticates, then reinstalls a preinstalled package from `/system`. */

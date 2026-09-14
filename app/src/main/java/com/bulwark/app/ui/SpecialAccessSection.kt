@@ -26,6 +26,8 @@ import com.bulwark.app.ui.theme.RatingRecommended
 import com.bulwark.app.ui.theme.RatingUnsafe
 import com.bulwark.app.ui.theme.Refused
 import com.bulwark.app.ui.theme.WorthLookingAt
+import androidx.compose.material3.TextButton
+import com.bulwark.app.permissions.Access
 import com.bulwark.app.permissions.AppAccess
 import com.bulwark.app.permissions.Attention
 import com.bulwark.app.permissions.AuditSummary
@@ -57,6 +59,16 @@ fun SpecialAccessSection(
     summary: AuditSummary,
     unavailable: List<String>,
     ratFindings: List<RatFinding> = emptyList(),
+    /**
+     * Take one access away from one app. Null while the screen is read-only.
+     *
+     * Offered only for the four that are app ops; the other three are
+     * enrolments Bulwark can see and cannot change, and `Access.opName` is what
+     * says which is which. A control that cannot act must not be drawn.
+     */
+    onRevoke: ((AppAccess, Access) -> Unit)? = null,
+    /** Which access is mid-change, so its control is not pressed twice. */
+    busy: Pair<String, Access>? = null,
 ) {
     Card {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -92,7 +104,7 @@ fun SpecialAccessSection(
             // not of one app, and they lose their meaning split across rows.
             ratFindings.forEach { RatFindingCard(it) }
 
-            apps.forEach { AccessRow(it, ratFindings) }
+            apps.forEach { AccessRow(it, ratFindings, onRevoke, busy) }
         }
     }
 }
@@ -132,7 +144,12 @@ private fun RatFindingCard(finding: RatFinding) {
 }
 
 @Composable
-private fun AccessRow(app: AppAccess, findings: List<RatFinding> = emptyList()) {
+private fun AccessRow(
+    app: AppAccess,
+    findings: List<RatFinding> = emptyList(),
+    onRevoke: ((AppAccess, Access) -> Unit)? = null,
+    busy: Pair<String, Access>? = null,
+) {
     Column(
         Modifier.padding(top = 8.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp),
@@ -159,8 +176,20 @@ private fun AccessRow(app: AppAccess, findings: List<RatFinding> = emptyList()) 
 
         Text(app.originLabel, style = MaterialTheme.typography.labelSmall)
 
-        app.accesses.sortedBy { it.name }.forEach {
-            Text("• ${it.plainMeaning}", style = MaterialTheme.typography.bodySmall)
+        app.accesses.sortedBy { it.name }.forEach { access ->
+            Text("• ${access.plainMeaning}", style = MaterialTheme.typography.bodySmall)
+            // One control per access, and only where there is an app op behind
+            // it. Accessibility, notification listening and device admin are
+            // enrolments kept elsewhere: Bulwark can report them and cannot
+            // switch them off, and an offer it cannot honour is the false sense
+            // of protection `safety-rules.md` calls worse than none.
+            if (onRevoke != null && access.opName != null) {
+                val isBusy = busy == app.packageName to access
+                TextButton(
+                    enabled = !isBusy,
+                    onClick = { onRevoke(app, access) },
+                ) { Text(if (isBusy) "Taking it away…" else "Take this away") }
+            }
         }
 
         // Minus anything a device-level finding above already explained.

@@ -44,6 +44,32 @@ enum class Access {
     ;
 
     /**
+     * The app op behind this access, or null when it is not one.
+     *
+     * Four of the seven live in AppOps; accessibility, notification listening
+     * and device admin are enrolments elsewhere and have no op. Null is the
+     * honest answer for those, and it is what stops the UI offering to revoke
+     * something Bulwark has no mechanism for.
+     *
+     * **The one home for this mapping.** `shizuku/AppOpsAccess` reads these
+     * ops and `policy/SpecialAccessActions` writes them; both take the name
+     * from here so the two cannot drift.
+     *
+     * Literal strings rather than `AppOpsManager.OPSTR_*` for two reasons: two
+     * of the four have no public constant at all, and the *string* is the
+     * stable part of the API - it is the int codes that get reordered between
+     * releases, which is why every caller resolves those at runtime.
+     */
+    val opName: String?
+        get() = when (this) {
+            DRAW_OVER_APPS -> "android:system_alert_window"
+            USAGE_ACCESS -> "android:get_usage_stats"
+            ALL_FILES -> "android:manage_external_storage"
+            INSTALL_UNKNOWN_APPS -> "android:request_install_packages"
+            ACCESSIBILITY, NOTIFICATION_LISTENER, DEVICE_ADMIN -> null
+        }
+
+    /**
      * What this lets an app do, said to a person rather than to a developer.
      *
      * Present tense and concrete. "Can read your screen" is a fact someone can

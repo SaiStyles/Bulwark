@@ -33,6 +33,7 @@ import com.bulwark.app.shizuku.CriticalRoles
 import com.bulwark.app.shizuku.PackageRemoval
 import com.bulwark.app.policy.FirewallActions
 import com.bulwark.app.policy.PermissionActions
+import com.bulwark.app.policy.SpecialAccessActions
 import com.bulwark.app.policy.SqliteActionLog
 import com.bulwark.app.security.StrictModePolicy
 import com.bulwark.app.security.WindowHardening
@@ -90,6 +91,7 @@ class MainActivity : ComponentActivity() {
             ),
             journal = journal,
             permissions = PermissionActions(journal),
+            specialAccess = SpecialAccessActions(journal),
             // System-ness from our own PackageManager, not the privileged one:
             // the firewall is the layer that must work with Shizuku dead.
             firewall = FirewallActions(

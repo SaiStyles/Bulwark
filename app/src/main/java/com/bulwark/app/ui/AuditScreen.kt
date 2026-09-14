@@ -35,6 +35,7 @@ import com.bulwark.app.firewall.FirewallState
 import com.bulwark.app.firewall.firewallDetail
 import com.bulwark.app.firewall.firewallHeadline
 import com.bulwark.app.firewall.firewallState
+import com.bulwark.app.permissions.Access
 import com.bulwark.app.permissions.AppAccess
 import com.bulwark.app.permissions.AuditSummary
 import com.bulwark.app.permissions.DeviceSignal
@@ -81,6 +82,8 @@ data class AuditReadings(
     val accessSummary: AuditSummary?,
     val accessUnavailable: List<String>,
     val ratSignals: List<RatFinding>,
+    /** Which access is mid-change, so its control is not pressed twice. */
+    val revoking: Pair<String, Access>?,
     val wirelessDebuggingOn: Boolean,
     val interrupted: List<ActionRecord>,
     /** Null means no read produced a list; the screen says something different for each. */
@@ -134,6 +137,7 @@ fun AuditScreen(
     var accessSummary by remember { mutableStateOf<AuditSummary?>(null) }
     var accessUnavailable by remember { mutableStateOf<List<String>>(emptyList()) }
     var ratSignals by remember { mutableStateOf<List<RatFinding>>(emptyList()) }
+    var revoking by remember { mutableStateOf<Pair<String, Access>?>(null) }
     // Needs no privilege - Settings.Global, world-readable, which is also
     // why a rogue app can check it before deciding to use it.
     var wirelessDebuggingOn by remember { mutableStateOf(false) }
@@ -322,6 +326,7 @@ fun AuditScreen(
             accessSummary = accessSummary,
             accessUnavailable = accessUnavailable,
             ratSignals = ratSignals,
+            revoking = revoking,
             wirelessDebuggingOn = wirelessDebuggingOn,
             interrupted = interrupted,
             permissionGroups = permissionGroups,
@@ -335,6 +340,17 @@ fun AuditScreen(
             lockdown = lockdown,
             shizukuReady = ready,
         ),
+        onRevokeAccess = { app, access ->
+            revoking = app.packageName to access
+            runner.revokeSpecialAccess(app.packageName, access) { outcome ->
+                revoking = null
+                report(outcome)
+                // Re-read rather than assume. The card must show what the phone
+                // says, not what was asked for - a revoke the platform ignored
+                // has to come back looking ignored.
+                reload++
+            }
+        },
         onOpenVpnSettings = { runCatching { context.startActivity(Firewall.vpnSettings()) } },
         onAllowVpn = { runner.requestVpnConsent() },
         onOpenShizuku = {
@@ -418,6 +434,7 @@ fun AuditScreen(
 @Composable
 fun AuditContent(
     readings: AuditReadings,
+    onRevokeAccess: (AppAccess, Access) -> Unit,
     onOpenVpnSettings: () -> Unit,
     onAllowVpn: () -> Unit,
     onOpenShizuku: () -> Unit,
@@ -472,7 +489,10 @@ fun AuditContent(
                     val a = readings.access
                     val s = readings.accessSummary
                     if (a != null && s != null) {
-                        CollapsibleAudit(a, s, readings.accessUnavailable, readings.ratSignals)
+                        CollapsibleAudit(
+                            a, s, readings.accessUnavailable, readings.ratSignals,
+                            onRevokeAccess, readings.revoking,
+                        )
                     } else {
                         Text(
                             "Checking what apps can do to you…",
@@ -633,12 +653,18 @@ private fun CollapsibleAudit(
     summary: AuditSummary,
     unavailable: List<String>,
     ratFindings: List<RatFinding>,
+    onRevokeAccess: (AppAccess, Access) -> Unit,
+    revoking: Pair<String, Access>?,
 ) {
     var expanded by rememberSaveable { mutableStateOf(true) }
 
     Column {
         if (expanded) {
-            SpecialAccessSection(apps, summary, unavailable, ratFindings)
+            SpecialAccessSection(
+                apps, summary, unavailable, ratFindings,
+                onRevoke = onRevokeAccess,
+                busy = revoking,
+            )
             TextButton(onClick = { expanded = false }) { Text("Hide") }
         } else {
             Card {

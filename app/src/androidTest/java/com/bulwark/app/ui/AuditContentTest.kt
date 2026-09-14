@@ -8,6 +8,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.bulwark.app.firewall.AlwaysOn
@@ -22,6 +23,7 @@ import com.bulwark.app.policy.ActionKind
 import com.bulwark.app.policy.ActionRecord
 import com.bulwark.app.policy.Phase
 import com.bulwark.app.ui.theme.BulwarkTheme
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -129,6 +131,7 @@ class AuditContentTest {
             BulwarkTheme {
                 AuditContent(
                     readings = readings.value,
+                    onRevokeAccess = { _, _ -> },
                     onOpenVpnSettings = {},
                     onAllowVpn = {},
                     onOpenShizuku = {},
@@ -147,6 +150,45 @@ class AuditContentTest {
         compose.onNodeWithText("What apps can do to you").assertIsDisplayed()
     }
 
+    /**
+     * The revoke control appears only where there is an app op behind the
+     * access. Accessibility, notification listening and device admin are
+     * enrolments Android keeps elsewhere - Bulwark can report them and cannot
+     * switch them off, and an offer it cannot honour is the false sense of
+     * protection `safety-rules.md` calls worse than none.
+     */
+    @Test
+    fun onlyAnAccessWithAnAppOpBehindItIsOfferedAControl() {
+        val apps = listOf(
+            AppAccess("com.example.overlay", setOf(Access.DRAW_OVER_APPS), isSystem = false),
+            AppAccess("com.example.reader", setOf(Access.ACCESSIBILITY), isSystem = false),
+        )
+        val tapped = mutableListOf<String>()
+        compose.setContent {
+            BulwarkTheme {
+                AuditContent(
+                    readings = fullyLoaded().copy(
+                        access = apps.audit(),
+                        accessSummary = apps.summarise(),
+                    ),
+                    onRevokeAccess = { app, access -> tapped += "${app.packageName}:$access" },
+                    onOpenVpnSettings = {},
+                    onAllowVpn = {},
+                    onOpenShizuku = {},
+                    onOpenDeveloperOptions = {},
+                    onOpenPermission = {},
+                    onRevokeAcross = { _, _ -> },
+                )
+            }
+        }
+
+        // One control, not two: only the overlay app has an op behind it.
+        compose.onAllNodesWithText("Take this away").assertCountEquals(1)
+
+        compose.onNodeWithText("Take this away").performClick()
+        assertEquals(listOf("com.example.overlay:DRAW_OVER_APPS"), tapped)
+    }
+
     @Test
     fun theFirewallCardAppearsOnlyWhenARuleExists() {
         render(fullyLoaded().copy(blockedApps = emptySet()))
@@ -163,6 +205,7 @@ class AuditContentTest {
             BulwarkTheme {
                 AuditContent(
                     readings = readings,
+                    onRevokeAccess = { _, _ -> },
                     onOpenVpnSettings = {},
                     onAllowVpn = {},
                     onOpenShizuku = {},
@@ -199,6 +242,7 @@ class AuditContentTest {
             access = apps.audit(),
             accessSummary = apps.summarise(),
             accessUnavailable = emptyList(),
+            revoking = null,
             ratSignals = listOf(
                 RatFinding(
                     headline = "Something can watch your screen and hide itself",
