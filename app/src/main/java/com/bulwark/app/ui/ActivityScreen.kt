@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Card
@@ -263,8 +264,18 @@ fun ActivityContent(
             )
 
             LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                // Ordered by how much a person can act on it, not by how the
-                // reads happen to be written above.
+                // **Two questions, not five readings.** Five cards of identical
+                // weight, each titled "What ...", made a screen with no order:
+                // nothing was loud, so nothing was findable, and a person
+                // looking for "did anything listen to me" had to read all five
+                // to find out. design.md rule 5.
+                //
+                // They divide cleanly. Two are about a person - what reached
+                // their microphone, camera and whereabouts. Three are about the
+                // phone - what keeps it busy. Headings say which is which, and
+                // the sensitive pair comes first.
+                item(key = "sensitive-heading") { SectionHeading("Your microphone, camera and location") }
+
                 item(key = "ledger") {
                     ObservationCard(
                         title = "What apps did while you were not looking",
@@ -293,6 +304,8 @@ fun ActivityContent(
                         rows = { it.requests.map(LocationRequests::line) },
                     )
                 }
+
+                item(key = "background-heading") { SectionHeading("What keeps this phone busy") }
 
                 item(key = "sensors") {
                     ObservationCard(
@@ -354,6 +367,24 @@ fun ActivityContent(
  * `T` is whatever the reading is; the card never inspects it and only asks the
  * three functions for words.
  */
+/**
+ * Names a group of readings, without becoming another card.
+ *
+ * `design.md` rule 3: hierarchy comes from type and space before containment.
+ * A heading in a heavier style with room above it separates two groups more
+ * clearly than a sixth box would, and costs no containment - which this screen
+ * had already spent five times over.
+ */
+@Composable
+private fun SectionHeading(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 14.dp, bottom = 2.dp),
+    )
+}
+
 @Composable
 private fun <T> ObservationCard(
     title: String,
@@ -374,7 +405,12 @@ private fun <T> ObservationCard(
      */
     monospace: Boolean = false,
 ) {
-    Card {
+    // **`fillMaxWidth`, which was missing.** Without it each card sized itself
+    // to its own title, so five cards made five different widths and the right
+    // edge of the screen zig-zagged. Read as broken rather than as designed,
+    // and no test could see it - the first screenshot of this screen did,
+    // 2026-09-14.
+    Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
 
@@ -412,12 +448,16 @@ private fun <T> ObservationCard(
                     // informs anyone - but a list silently cut short is the
                     // false all-clear this screen is written against, so the
                     // remainder is counted out loud rather than dropped.
+                    // Indented under the headline that introduces them, the
+                    // same one step the audit uses. A row is a detail of this
+                    // reading, not a peer of its title.
                     val all = rows(loaded)
                     all.take(MAX_ROWS).forEach { row ->
                         Text(
                             row,
                             style = MaterialTheme.typography.bodySmall,
                             fontFamily = if (monospace) FontFamily.Monospace else null,
+                            modifier = Modifier.padding(start = 14.dp),
                         )
                     }
                     if (all.size > MAX_ROWS) {
