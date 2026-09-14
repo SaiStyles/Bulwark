@@ -140,7 +140,6 @@ class MainActivity : ComponentActivity() {
                 // a regression the split must not introduce. rememberSaveable,
                 // so it also survives the process being killed.
                 var query by rememberSaveable { mutableStateOf("") }
-                var onlyOffered by rememberSaveable { mutableStateOf(false) }
 
                 // Blocks Bulwark holds are re-applied when the app is opened,
                 // once, whichever destination the user lands on.
@@ -202,8 +201,6 @@ class MainActivity : ComponentActivity() {
                             snackbar = snackbar,
                             query = query,
                             onQueryChange = { query = it },
-                            onlyOffered = onlyOffered,
-                            onOnlyOfferedChange = { onlyOffered = it },
                             modifier = Modifier.padding(innerPadding),
                         )
                         Destination.AUDIT -> AuditScreen(

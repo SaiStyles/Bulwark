@@ -123,8 +123,6 @@ class AppsContentTest {
                     actions = RecordingActions(),
                     query = query,
                     onQueryChange = {},
-                    onlyOffered = false,
-                    onOnlyOfferedChange = {},
                     onOutcome = {},
                 )
             }

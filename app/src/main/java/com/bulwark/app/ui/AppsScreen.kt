@@ -13,7 +13,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -111,8 +110,6 @@ fun AppsScreen(
     snackbar: SnackbarHostState,
     query: String,
     onQueryChange: (String) -> Unit,
-    onlyOffered: Boolean,
-    onOnlyOfferedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -217,8 +214,6 @@ fun AppsScreen(
         actions = runner,
         query = query,
         onQueryChange = onQueryChange,
-        onlyOffered = onlyOffered,
-        onOnlyOfferedChange = onOnlyOfferedChange,
         onOutcome = ::report,
         modifier = modifier,
     )
@@ -238,16 +233,19 @@ fun AppsContent(
     actions: RowActions,
     query: String,
     onQueryChange: (String) -> Unit,
-    onlyOffered: Boolean,
-    onOnlyOfferedChange: (Boolean) -> Unit,
     onOutcome: (ActionRunner.Outcome) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
 
+    // **The "Only what I can change" chip is gone**, 2026-09-14. It hid the
+    // packages Bulwark refuses - itself and Shizuku - which is two rows out of
+    // 368 on the Agni 2. A filter that removes half a percent of a list is a
+    // control that costs a tap, a line of copy and a piece of saved state to do
+    // nothing anybody would notice. The refused rows say why they are refused,
+    // which was always the useful half.
     val shown = readings.entries.orEmpty().filter { e ->
-        (!onlyOffered || e.isOffered) &&
-            (query.isBlank() || e.packageName.contains(query, ignoreCase = true))
+        query.isBlank() || e.packageName.contains(query, ignoreCase = true)
     }
     val shownCount = shown.size
 
@@ -309,11 +307,6 @@ fun AppsContent(
                             label = { Text("Search") },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                        )
-                        FilterChip(
-                            selected = onlyOffered,
-                            onClick = { onOnlyOfferedChange(!onlyOffered) },
-                            label = { Text("Only what I can change") },
                         )
                         Text(
                             "$shownCount shown",
