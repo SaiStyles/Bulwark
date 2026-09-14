@@ -929,7 +929,12 @@ private fun HiddenSwitchCard(
     Card {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
-                "Switches Android does not give you",
+                // **Named for what it does, not for what it proves.**
+                // "Switches Android does not give you" was a claim about
+                // Android, and a grand one, sitting over a card about the
+                // clipboard. Someone scanning the screen could not tell what
+                // it governed. design.md rule 7: name what a thing is.
+                "Apps that can read what you copy",
                 style = MaterialTheme.typography.titleMedium,
             )
 

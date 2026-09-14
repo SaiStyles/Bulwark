@@ -99,11 +99,14 @@ data class HiddenSwitchHolder(
  */
 fun hiddenSwitchHeadline(holders: List<HiddenSwitchHolder>): String {
     if (holders.isEmpty()) {
-        return "No app on this phone holds one of these. That is unusual, so " +
-            "treat it as worth a second look rather than good news."
+        return "No app on this phone can read your clipboard. That is unusual, " +
+            "so treat it as worth a second look rather than good news."
     }
     val apps = if (holders.size == 1) "1 app" else "${holders.size} apps"
-    return "$apps can read or change your clipboard."
+    // Says the capability, not the category. "Can read or change your
+    // clipboard" is accurate and abstract; what it means is that a password
+    // copied out of a password manager is readable by every one of them.
+    return "$apps can read anything you copy, or change what you paste."
 }
 
 /**

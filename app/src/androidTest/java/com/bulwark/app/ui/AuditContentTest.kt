@@ -213,7 +213,8 @@ class AuditContentTest {
         scrollTo("Android has no setting for this")
         compose.onNodeWithText("Android has no setting for this", substring = true)
             .assertIsDisplayed()
-        compose.onNodeWithText("1 app can read or change your clipboard.").assertIsDisplayed()
+        compose.onNodeWithText("1 app can read anything you copy, or change what you paste.")
+            .assertIsDisplayed()
     }
 
     /** It reports; it does not accuse. Most apps hold these for ordinary reasons. */
