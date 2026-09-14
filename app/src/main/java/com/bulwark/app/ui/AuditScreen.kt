@@ -508,10 +508,11 @@ fun AuditContent(
             // repeats none of them is a heading that tells you nothing.
             //
             // Not "what apps can do to you" - the first card already says that,
-            // and the permissions card below says "What apps can do". Three
-            // near-identical phrases on one screen is the heading telling you
-            // nothing. design.md calls this screen's job "what is true about
-            // this phone", so it says that.
+            // and the permissions card below says "Who holds each permission"
+            // - which it did not until 2026-09-14, when it read "What apps can
+            // do" and the two were indistinguishable at a glance. design.md
+            // calls this screen's job "what is true about this phone", so the
+            // heading says that and each card says its own question.
             Text(
                 "What is true about this phone",
                 style = MaterialTheme.typography.headlineSmall,

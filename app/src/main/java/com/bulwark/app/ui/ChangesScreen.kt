@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.bulwark.app.permissions.wordsFor
 import com.bulwark.app.ui.theme.CautionText
+import com.bulwark.app.policy.Attribution
 import com.bulwark.app.policy.Change
 import com.bulwark.app.policy.canBeUndone
 import com.bulwark.app.policy.whyNoUndo
@@ -154,6 +155,29 @@ fun ChangesScreen(
                             "list first.",
                         style = MaterialTheme.typography.bodySmall,
                     )
+                    // The export writes `journal.history()` - Bulwark's own
+                    // record, and nothing else. That is exactly right for the
+                    // file and wrong as a promise about *this list*, which also
+                    // carries rows the phone reported and Bulwark never did.
+                    // The button sits under the list, so a reader takes the
+                    // label as describing what they can see. Said only when the
+                    // two actually differ, because a caveat that is always on
+                    // screen stops being read.
+                    val unclaimed = list.count { it.attribution == Attribution.UNRECORDED }
+                    if (unclaimed > 0) {
+                        Text(
+                            if (unclaimed == 1) {
+                                "The 1 change above that is not in Bulwark's log " +
+                                    "will not be in the file. Bulwark can only " +
+                                    "export its own record."
+                            } else {
+                                "The $unclaimed changes above that are not in " +
+                                    "Bulwark's log will not be in the file. " +
+                                    "Bulwark can only export its own record."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                     // Warned BEFORE the picker, not after the file exists.
                     // threat-model.md: for someone who has just switched off
                     // monitoring software, a file naming it - sitting in
@@ -163,7 +187,7 @@ fun ChangesScreen(
                     // is a receipt. Carried over verbatim when this moved here,
                     // because the first rewrite of it was weaker and later.
                     Text(
-                        "This file lists every app you changed, and it stays " +
+                        "This file lists every app Bulwark changed, and it stays " +
                             "wherever you save it. If someone else can reach " +
                             "this phone, choose somewhere they cannot.",
                         style = MaterialTheme.typography.bodySmall,

@@ -295,6 +295,24 @@ class AuditContentTest {
         compose.onAllNodesWithText("Show all", substring = true).assertCountEquals(0)
     }
 
+    /**
+     * The two cards on this screen have to answer visibly different questions.
+     *
+     * Until 2026-09-14 the special-access card read "What apps can do to you"
+     * and the permissions card, one card below it, read "What apps can do".
+     * Both plain language, both accurate, and side by side they told a person
+     * scanning the screen nothing about which was which.
+     */
+    @Test
+    fun theTwoAuditCardsDoNotHaveNearIdenticalTitles() {
+        render(fullyLoaded())
+
+        scrollTo("Who holds each permission")
+        compose.onNodeWithText("Who holds each permission").assertIsDisplayed()
+        // The old title, which differed from the card above by two words.
+        compose.onAllNodesWithText("What apps can do").assertCountEquals(0)
+    }
+
     @Test
     fun theFirewallCardAppearsOnlyWhenARuleExists() {
         render(fullyLoaded().copy(blockedApps = emptySet()))

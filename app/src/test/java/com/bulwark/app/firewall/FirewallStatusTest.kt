@@ -60,6 +60,23 @@ class FirewallStatusTest {
         assertTrue(detail.contains("can reach the internet"))
     }
 
+    /**
+     * Reporting the lapse without saying what ends it leaves someone stuck.
+     *
+     * Opening Bulwark re-applies every rule it holds, by itself - `MainActivity`
+     * does it on launch whenever at least one rule exists. This is the only
+     * screen that reports the lapse, so it is the only place that sentence can
+     * usefully go, and it was missing until 2026-09-14.
+     */
+    @Test
+    fun `a lapsed firewall says what puts the blocks back`() {
+        val detail = firewallDetail(FirewallState.NOT_IN_FORCE, alwaysOn = AlwaysOn.OFF, lockdown = false)!!
+        assertTrue(
+            "must say opening Bulwark restores the blocks: $detail",
+            detail.contains("Opening Bulwark", true),
+        )
+    }
+
     @Test
     fun `consent needed is distinct from not working`() {
         // Different problem, different fix. Collapsing them would tell someone

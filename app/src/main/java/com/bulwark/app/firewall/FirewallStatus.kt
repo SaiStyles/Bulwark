@@ -110,9 +110,15 @@ fun firewallDetail(
                 "dropped. No other app's traffic passes through Bulwark."
 
         FirewallState.NOT_IN_FORCE ->
+            // Ends by saying what to *do*. The rest of this sentence tells
+            // someone their blocks have lapsed and then leaves them there;
+            // opening Bulwark is what puts them back, it happens by itself,
+            // and until 2026-09-14 the one screen reporting the lapse never
+            // mentioned it. Verified against `MainActivity`, which re-applies
+            // on open whenever at least one rule exists.
             "Rules are cleared whenever the phone restarts, and whenever Android " +
                 "stops the tunnel. These apps can reach the internet until it is " +
-                "running again."
+                "running again. Opening Bulwark puts them back."
 
         FirewallState.IN_FORCE -> when (alwaysOn) {
             AlwaysOn.ON ->

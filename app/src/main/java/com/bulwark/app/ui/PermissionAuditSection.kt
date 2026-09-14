@@ -80,7 +80,14 @@ fun PermissionAuditSection(
 ) {
     Card {
         Column(Modifier.padding(16.dp)) {
-            Text("What apps can do", style = MaterialTheme.typography.titleMedium)
+            // **Not "What apps can do".** That sat one card below "What apps
+            // can do to you" on the same screen, and two titles differing by
+            // two words distinguish nothing - a person scanning the screen
+            // cannot tell which card answers which question. This one names
+            // its organising idea instead, which is also the reason it exists:
+            // Android shows permissions one app at a time, and this shows one
+            // permission across every app at once.
+            Text("Who holds each permission", style = MaterialTheme.typography.titleMedium)
             Spacer()
             Text(
                 "Every app holding each permission Android treats as yours to " +
