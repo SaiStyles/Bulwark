@@ -1,5 +1,7 @@
 package com.bulwark.app.policy
 
+import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteOpenHelper
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
@@ -24,9 +26,12 @@ import org.junit.runner.RunWith
  * own SQLite on the hardware Bulwark targets, and adds no dependency to a
  * project that counts them (`supply-chain.md`).
  *
- * Runs against the app's real database file, so it starts by clearing it. That
- * is safe here and would not be in production, which is why nothing in `main/`
- * can do it - see `ActionLogContractTest`.
+ * **Runs against its own database file, never the app's.** It used to use the
+ * real one and clear it in `@Before` - documented in this very comment, and
+ * still destroyed a phone's entire action history on 2026-09-14 when someone
+ * ran the suite without re-reading it. An append-only record of what was done
+ * to a stranger's phone is exactly the thing a test must not be able to reach,
+ * so `SqliteActionLog` now takes the filename and this passes a test-only one.
  */
 @RunWith(AndroidJUnit4::class)
 class SqliteActionLogTest {
@@ -36,8 +41,8 @@ class SqliteActionLogTest {
 
     @Before
     fun freshDatabase() {
-        context.deleteDatabase("action-log.db")
-        log = SqliteActionLog(context)
+        context.deleteDatabase(DATABASE)
+        log = SqliteActionLog(context, databaseName = DATABASE)
     }
 
     private fun entry(
@@ -123,7 +128,7 @@ class SqliteActionLogTest {
         val attempt = log.append(entry())
         log.append(entry(phase = Phase.SUCCEEDED, attemptId = attempt))
 
-        val reopened = SqliteActionLog(context)
+        val reopened = SqliteActionLog(context, databaseName = DATABASE)
         val rows = reopened.all()
         assertEquals(2, rows.size)
         assertEquals(attempt, rows[1].attemptId)
@@ -137,7 +142,7 @@ class SqliteActionLogTest {
         // reopen or it is worthless.
         log.append(entry(pkg = "com.interrupted"))
 
-        val rows = SqliteActionLog(context).all()
+        val rows = SqliteActionLog(context, databaseName = DATABASE).all()
         assertEquals("com.interrupted", rows.unfinished().single().packageName)
     }
 
@@ -146,7 +151,7 @@ class SqliteActionLogTest {
         val clock = object {
             var now = 1_000L
         }
-        val timed = SqliteActionLog(context) { clock.now }
+        val timed = SqliteActionLog(context, databaseName = DATABASE) { clock.now }
         timed.append(entry())
         clock.now = 2_000L
         timed.append(entry())
@@ -168,8 +173,98 @@ class SqliteActionLogTest {
         val attempt = log.append(entry(pkg = "com.oem.bloat", previousState = 4))
         log.append(entry(pkg = "com.oem.bloat", phase = Phase.SUCCEEDED, attemptId = attempt))
 
-        val plan = SqliteActionLog(context).all().undoPlan().single()
+        val plan = SqliteActionLog(context, databaseName = DATABASE).all().undoPlan().single()
         assertEquals(ActionKind.ENABLE, plan.kind)
         assertEquals("must carry the state we found, not a guess", 4, plan.previousState)
     }
+
+    /**
+     * **The migration, on a log that already has rows in it.**
+     *
+     * Every other test here starts from an empty database, so none of them
+     * would notice if `onUpgrade` dropped the table - and SAI's phone holds a
+     * real version-2 log full of real actions. An append-only record that a
+     * version bump silently empties is the worst outcome this file can have,
+     * and until now no test covered it: 1 -> 2 shipped untested in 2026-09-11.
+     *
+     * Builds a version-2 database by hand, in the shape a phone in the field
+     * is holding right now, then opens the real `SqliteActionLog` over it.
+     */
+    @Test
+    fun aVersionTwoLogUpgradesInPlaceAndKeepsEveryRow() {
+        context.deleteDatabase(DATABASE)
+
+        val legacy = object : SQLiteOpenHelper(context, DATABASE, null, 2) {
+            override fun onCreate(db: SQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE actions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        at_millis INTEGER NOT NULL,
+                        package_name TEXT NOT NULL,
+                        kind TEXT NOT NULL,
+                        phase TEXT NOT NULL,
+                        user_id INTEGER NOT NULL,
+                        previous_state INTEGER,
+                        attempt_id INTEGER,
+                        detail TEXT,
+                        permission TEXT
+                    )
+                    """.trimIndent(),
+                )
+            }
+
+            override fun onUpgrade(db: SQLiteDatabase, old: Int, new: Int) = Unit
+        }
+        legacy.writableDatabase.execSQL(
+            "INSERT INTO actions " +
+                "(at_millis, package_name, kind, phase, user_id, previous_state, permission) " +
+                "VALUES (1000, 'com.test.legacy', 'REVOKE_PERMISSION', 'SUCCEEDED', 0, 1, " +
+                "'android.permission.CAMERA')",
+        )
+        legacy.close()
+
+        val rows = SqliteActionLog(context, databaseName = DATABASE).all()
+
+        assertEquals("the version-2 row did not survive the upgrade", 1, rows.size)
+        val row = rows.single()
+        assertEquals("com.test.legacy", row.packageName)
+        assertEquals(ActionKind.REVOKE_PERMISSION, row.kind)
+        assertEquals("android.permission.CAMERA", row.permission)
+        assertEquals(1, row.previousState)
+        // Null is the truth for an old row, not a gap: no app op was involved.
+        assertNull(row.appOp)
+        assertNull(row.previousUidState)
+    }
+
+    /** A row written after the upgrade carries the new columns. */
+    @Test
+    fun anUpgradedLogCanStoreTheNewAppOpColumns() {
+        context.deleteDatabase(DATABASE)
+        val fresh = SqliteActionLog(context, databaseName = DATABASE)
+
+        fresh.append(
+            NewEntry(
+                packageName = "com.test.app",
+                kind = ActionKind.REVOKE_SPECIAL_ACCESS,
+                phase = Phase.ATTEMPTED,
+                userId = 0,
+                previousState = 3,
+                appOp = "android:manage_external_storage",
+                previousUidState = 0,
+            ),
+        )
+
+        val row = fresh.all().single()
+        assertEquals("android:manage_external_storage", row.appOp)
+        assertEquals(3, row.previousState)
+        // Zero is a real mode (MODE_ALLOWED) and must not read as absent.
+        assertEquals(0, row.previousUidState)
+    }
+
+    private companion object {
+        /** **Not** `action-log.db`. See the class note. */
+        const val DATABASE = "action-log-test.db"
+    }
+
 }

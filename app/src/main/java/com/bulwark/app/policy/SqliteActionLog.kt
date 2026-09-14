@@ -48,6 +48,22 @@ import android.os.Looper
  */
 class SqliteActionLog(
     context: Context,
+    /**
+     * Which database file. Defaults to the real one.
+     *
+     * A parameter so a **test can never open production data**. It was a
+     * hardcoded name until 2026-09-14, when `SqliteActionLogTest` - which
+     * deletes its database in `@Before`, and said so in its own KDoc - ran
+     * against a phone holding a real log and destroyed it. The warning was
+     * written down; nobody re-read it at the moment it mattered, which is the
+     * argument for making a thing impossible rather than documented.
+     *
+     * **Declared before `now`, not after.** A trailing lambda binds to the
+     * *last* parameter, so putting this last would silently rebind every
+     * existing `SqliteActionLog(context) { clock }` call to the filename. That
+     * exact bug already happened once in this repo, in `TunnelOnHardware`.
+     */
+    databaseName: String = DATABASE_NAME,
     private val now: () -> Long = System::currentTimeMillis,
 ) : ActionLog {
 
@@ -77,7 +93,7 @@ class SqliteActionLog(
     }
 
     private val helper = object : SQLiteOpenHelper(
-        context.applicationContext, DATABASE_NAME, null, VERSION,
+        context.applicationContext, databaseName, null, VERSION,
     ) {
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL(CREATE_TABLE)
@@ -94,6 +110,15 @@ class SqliteActionLog(
             // get NULL, which is the truth: they were whole-app actions and
             // there was no permission involved.
             if (old < 2) db.execSQL("ALTER TABLE $TABLE ADD COLUMN $COL_PERMISSION TEXT")
+            // 2 -> 3 (2026-09-14) adds the app op a row is about and the
+            // uid-level mode it had before. Two columns rather than reusing
+            // the two above: an op is not a permission, and the package-level
+            // previous state is not the uid-level one. Old rows get NULL,
+            // which is again the truth - no app op was involved.
+            if (old < 3) {
+                db.execSQL("ALTER TABLE $TABLE ADD COLUMN $COL_APP_OP TEXT")
+                db.execSQL("ALTER TABLE $TABLE ADD COLUMN $COL_PREVIOUS_UID_STATE INTEGER")
+            }
         }
 
         override fun onDowngrade(db: SQLiteDatabase, old: Int, new: Int) {
@@ -115,6 +140,8 @@ class SqliteActionLog(
             entry.attemptId?.let { put(COL_ATTEMPT, it) }
             entry.detail?.let { put(COL_DETAIL, it) }
             entry.permission?.let { put(COL_PERMISSION, it) }
+            entry.appOp?.let { put(COL_APP_OP, it) }
+            entry.previousUidState?.let { put(COL_PREVIOUS_UID_STATE, it) }
         }
         val id = helper.writableDatabase.insertOrThrow(TABLE, null, values)
         // insertOrThrow already throws on failure; -1 would mean the contract
@@ -154,6 +181,8 @@ class SqliteActionLog(
         attemptId = getLongOrNull(COL_ATTEMPT),
         detail = getStringOrNull(COL_DETAIL),
         permission = getStringOrNull(COL_PERMISSION),
+        appOp = getStringOrNull(COL_APP_OP),
+        previousUidState = getIntOrNull(COL_PREVIOUS_UID_STATE),
     )
 
     private fun Cursor.getIntOrNull(column: String): Int? =
@@ -169,13 +198,14 @@ class SqliteActionLog(
         const val DATABASE_NAME = "action-log.db"
 
         /**
-         * 2 since 2026-09-11: `permission` added for the two permission kinds.
+         * 3 since 2026-09-14: `app_op` and `previous_uid_state` added for the
+         * two special-access kinds. 2 since 2026-09-11 added `permission`.
          *
-         * A phone that already holds a version-1 log upgrades in place through
+         * A phone that already holds an older log upgrades in place through
          * `onUpgrade`; nothing is rewritten and nothing is lost, which is the
          * only migration an append-only table can honestly perform.
          */
-        const val VERSION = 2
+        const val VERSION = 3
 
         const val TABLE = "actions"
         const val COL_ID = "id"
@@ -188,6 +218,8 @@ class SqliteActionLog(
         const val COL_ATTEMPT = "attempt_id"
         const val COL_DETAIL = "detail"
         const val COL_PERMISSION = "permission"
+        const val COL_APP_OP = "app_op"
+        const val COL_PREVIOUS_UID_STATE = "previous_uid_state"
 
         const val CREATE_TABLE = """
             CREATE TABLE $TABLE (
@@ -200,7 +232,9 @@ class SqliteActionLog(
                 $COL_PREVIOUS_STATE INTEGER,
                 $COL_ATTEMPT INTEGER,
                 $COL_DETAIL TEXT,
-                $COL_PERMISSION TEXT
+                $COL_PERMISSION TEXT,
+                $COL_APP_OP TEXT,
+                $COL_PREVIOUS_UID_STATE INTEGER
             )
         """
 

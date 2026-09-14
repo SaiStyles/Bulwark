@@ -96,6 +96,28 @@ enum class ActionKind {
 
     /** Let it reach the network again. The undo for [BLOCK_NETWORK]. */
     ALLOW_NETWORK,
+
+    /**
+     * `setUidMode` / `setMode` on one app op - overlay, all-files, usage
+     * access, install-unknown-apps.
+     *
+     * Not a runtime permission, and deliberately a separate kind: an app op
+     * lives underneath permissions, has no prompt, and is taken away by a
+     * different call. Measured writable on the Agni 2, 2026-09-14
+     * (`../../context/layers/02-permissions/app-ops.md`).
+     *
+     * Rows of this kind must carry [NewEntry.appOp], for the same reason the
+     * permission kinds must name their permission: the undo would otherwise
+     * know the app and the intent and have nothing to act on.
+     *
+     * They should also carry [NewEntry.previousUidState] wherever the op was
+     * held at uid level, because restoring only the package entry leaves state
+     * the phone never had.
+     */
+    REVOKE_SPECIAL_ACCESS,
+
+    /** Gives the app op back. The undo for [REVOKE_SPECIAL_ACCESS]. */
+    GRANT_SPECIAL_ACCESS,
     ;
 
     /**
@@ -117,12 +139,14 @@ enum class ActionKind {
             GRANT_PERMISSION -> REVOKE_PERMISSION
             BLOCK_NETWORK -> ALLOW_NETWORK
             ALLOW_NETWORK -> BLOCK_NETWORK
+            REVOKE_SPECIAL_ACCESS -> GRANT_SPECIAL_ACCESS
+            GRANT_SPECIAL_ACCESS -> REVOKE_SPECIAL_ACCESS
         }
 
     /** True when this takes a capability away rather than giving it back. */
     val isDestructive: Boolean
         get() = this == DISABLE || this == UNINSTALL || this == REVOKE_PERMISSION ||
-            this == BLOCK_NETWORK
+            this == BLOCK_NETWORK || this == REVOKE_SPECIAL_ACCESS
 
     /** True when this action is about the firewall rather than system state. */
     val isNetworkRule: Boolean
@@ -131,6 +155,16 @@ enum class ActionKind {
     /** True when this action is about one permission rather than a whole app. */
     val isPermissionChange: Boolean
         get() = this == REVOKE_PERMISSION || this == GRANT_PERMISSION
+
+    /**
+     * True when this action is about one **app op** rather than a permission.
+     *
+     * Separate from [isPermissionChange] on purpose. `wordsFor()` maps runtime
+     * permission strings to plain words and would produce nonsense for an op
+     * string, so the two must never share a field or a branch.
+     */
+    val isSpecialAccessChange: Boolean
+        get() = this == REVOKE_SPECIAL_ACCESS || this == GRANT_SPECIAL_ACCESS
 }
 
 /** Where one attempt got to. */
@@ -171,6 +205,25 @@ data class NewEntry(
     /** Free text. An error message on failure; otherwise usually null. */
     val detail: String? = null,
     /**
+     * The app op this row is about, for the special-access kinds. Null for
+     * everything else, and `ActionJournal` enforces both directions.
+     *
+     * Its own field rather than reusing [permission]: `ActionLogExport` and
+     * `StepOutcome` both run [permission] through `wordsFor()`, which knows
+     * runtime permissions and would print nonsense for `android:…` op strings.
+     */
+    val appOp: String? = null,
+    /**
+     * The **uid-level** mode this op had before, for the special-access kinds.
+     *
+     * [previousState] carries the package-level mode; this carries the uid one,
+     * because an op can be held at either level and `checkOperation` resolves
+     * the uid entry first. Restoring only one of the two leaves state the phone
+     * never had - which happened once on hardware, 2026-09-14, and is why both
+     * are recorded.
+     */
+    val previousUidState: Int? = null,
+    /**
      * The permission this row is about, for [ActionKind.REVOKE_PERMISSION] and
      * [ActionKind.GRANT_PERMISSION]. Null for everything else.
      *
@@ -194,6 +247,10 @@ data class ActionRecord(
     val detail: String?,
     /** The permission, for the two permission kinds. Null for the rest. */
     val permission: String? = null,
+    /** The app op, for the two special-access kinds. Null for the rest. */
+    val appOp: String? = null,
+    /** The uid-level mode before the change, for the special-access kinds. */
+    val previousUidState: Int? = null,
 )
 
 /**

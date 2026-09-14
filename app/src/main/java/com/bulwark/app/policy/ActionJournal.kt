@@ -59,6 +59,8 @@ class ActionJournal(private val log: ActionLog) {
         userId: Int = 0,
         previousState: Int? = null,
         permission: String? = null,
+        appOp: String? = null,
+        previousUidState: Int? = null,
         block: () -> T,
     ): T {
         // A permission action that does not say which permission cannot be
@@ -71,6 +73,14 @@ class ActionJournal(private val log: ActionLog) {
         require(kind.isPermissionChange || permission == null) {
             "$kind is not a permission change; it must not record one"
         }
+        // The same rule for app ops, and for the same reason: an undo that
+        // knows the app and the intent but not which op has nothing to act on.
+        require(!kind.isSpecialAccessChange || appOp != null) {
+            "$kind must record which app op it changed"
+        }
+        require(kind.isSpecialAccessChange || appOp == null) {
+            "$kind is not a special-access change; it must not record an app op"
+        }
 
         val attemptId = log.append(
             NewEntry(
@@ -80,6 +90,8 @@ class ActionJournal(private val log: ActionLog) {
                 userId = userId,
                 previousState = previousState,
                 permission = permission,
+                appOp = appOp,
+                previousUidState = previousUidState,
             )
         )
 

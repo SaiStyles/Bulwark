@@ -31,19 +31,27 @@ enum class ChangeKind {
 
     /** Removed for this user. The APK stays on `/system`. Not built yet. */
     UNINSTALLED,
+
+    /**
+     * An app op taken away - overlay, all-files, usage access,
+     * install-unknown-apps. Keyed by package *and* op, like a permission.
+     */
+    SPECIAL_ACCESS_TAKEN,
 }
 
 /**
  * One thing Bulwark changed, and can put back.
  *
- * [permission] is set only for [ChangeKind.PERMISSION_TAKEN]; the same package
- * can appear several times, once per permission, because each is undone
- * separately.
+ * [permission] is set only for [ChangeKind.PERMISSION_TAKEN] and [appOp] only
+ * for [ChangeKind.SPECIAL_ACCESS_TAKEN]; the same package can appear several
+ * times, once per capability, because each is undone separately.
  */
 data class Change(
     val packageName: String,
     val kind: ChangeKind,
     val permission: String? = null,
+    /** The app op, for [ChangeKind.SPECIAL_ACCESS_TAKEN]. Never a permission. */
+    val appOp: String? = null,
     val atEpochMillis: Long = 0L,
     val attribution: Attribution = Attribution.BULWARK,
 )
@@ -180,6 +188,7 @@ val ChangeKind.undoKind: ActionKind
         ChangeKind.PERMISSION_TAKEN -> ActionKind.GRANT_PERMISSION
         ChangeKind.INTERNET_BLOCKED -> ActionKind.ALLOW_NETWORK
         ChangeKind.UNINSTALLED -> ActionKind.INSTALL_EXISTING
+        ChangeKind.SPECIAL_ACCESS_TAKEN -> ActionKind.GRANT_SPECIAL_ACCESS
     }
 
 private val ActionKind.changes: ChangeKind?
@@ -188,6 +197,8 @@ private val ActionKind.changes: ChangeKind?
         ActionKind.REVOKE_PERMISSION, ActionKind.GRANT_PERMISSION -> ChangeKind.PERMISSION_TAKEN
         ActionKind.BLOCK_NETWORK, ActionKind.ALLOW_NETWORK -> ChangeKind.INTERNET_BLOCKED
         ActionKind.UNINSTALL, ActionKind.INSTALL_EXISTING -> ChangeKind.UNINSTALLED
+        ActionKind.REVOKE_SPECIAL_ACCESS, ActionKind.GRANT_SPECIAL_ACCESS ->
+            ChangeKind.SPECIAL_ACCESS_TAKEN
     }
 
 /** True for the half of each pair that leaves the phone changed. */
@@ -195,7 +206,8 @@ private val ActionKind.leavesAChange: Boolean
     get() = this == ActionKind.DISABLE ||
         this == ActionKind.REVOKE_PERMISSION ||
         this == ActionKind.BLOCK_NETWORK ||
-        this == ActionKind.UNINSTALL
+        this == ActionKind.UNINSTALL ||
+        this == ActionKind.REVOKE_SPECIAL_ACCESS
 
 /**
  * Everything Bulwark has changed and not put back.
@@ -282,8 +294,19 @@ fun Change.describe(): String = when {
         "Permission taken away. The app can ask again, and you may say yes."
     kind == ChangeKind.INTERNET_BLOCKED ->
         "Set to block the internet. Enforced only while Bulwark's tunnel runs."
-    else ->
+    kind == ChangeKind.SPECIAL_ACCESS_TAKEN ->
+        "Special access taken away. Android never prompted for this one, and " +
+            "the app can ask for it again."
+    // Named rather than left to `else`. This used to end in an `else` that
+    // said "Removed for this user", so the next kind added would have silently
+    // inherited the uninstall sentence and described itself wrongly on the one
+    // screen that exists to say what happened. Caught adding the app-op kinds,
+    // 2026-09-14.
+    kind == ChangeKind.UNINSTALLED ->
         "Removed for this user. The APK is still on the system partition."
+    else ->
+        "Bulwark changed this and cannot describe how, which is a bug in " +
+            "Bulwark rather than a fact about your phone."
 }
 
 /** The button on the row. Names the undo, not the change. */
@@ -292,4 +315,5 @@ fun Change.undoLabel(): String = when (kind) {
     ChangeKind.PERMISSION_TAKEN -> "Give it back"
     ChangeKind.INTERNET_BLOCKED -> "Allow online"
     ChangeKind.UNINSTALLED -> "Put back"
+    ChangeKind.SPECIAL_ACCESS_TAKEN -> "Give access back"
 }

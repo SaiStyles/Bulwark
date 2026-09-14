@@ -89,6 +89,7 @@ object ActionLogExport {
         append(subject)
         if (userId != 0) append("  (user $userId)")
         previousState?.let { append("  [was enabled-state $it]") }
+        previousUidState?.let { append("  [uid op mode was $it]") }
         detail?.let { append("  - $it") }
     }
 
@@ -100,9 +101,13 @@ object ActionLogExport {
      * came back, the person reading the bug report wants the constant.
      */
     private val ActionRecord.subject: String
-        get() = when (permission) {
-            null -> packageName
-            else -> "$packageName  ${wordsFor(permission).name} [$permission]"
+        get() = when {
+            permission != null -> "$packageName  ${wordsFor(permission).name} [$permission]"
+            // The raw op string and nothing else. `wordsFor` knows runtime
+            // permissions and would print nonsense for `android:…`, which is
+            // why an op has its own field rather than borrowing that one.
+            appOp != null -> "$packageName  [$appOp]"
+            else -> packageName
         }
 
     private fun format(epochMillis: Long): String =
@@ -125,6 +130,10 @@ internal val ActionKind.humanVerb: String
         // com.example  Microphone" rather than naming a mechanism.
         ActionKind.REVOKE_PERMISSION -> "took away"
         ActionKind.GRANT_PERMISSION -> "gave back"
+        // Said about a capability Android never prompted for, so the verb
+        // names the act rather than the mechanism.
+        ActionKind.REVOKE_SPECIAL_ACCESS -> "took access from"
+        ActionKind.GRANT_SPECIAL_ACCESS -> "gave access back"
         // Said as what the user asked for, not as what the tunnel did. These
         // record an intent; whether it was in force at any given moment is a
         // different question and the log must not imply it answers that one.

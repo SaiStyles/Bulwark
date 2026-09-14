@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -39,6 +40,8 @@ class ActionJournalTest {
                 attemptId = entry.attemptId,
                 detail = entry.detail,
                 permission = entry.permission,
+                appOp = entry.appOp,
+                previousUidState = entry.previousUidState,
             )
             return id
         }
@@ -262,4 +265,59 @@ class ActionJournalTest {
         assertEquals(2, log.all().size)
         assertTrue(log.all().all { it.permission == "android.permission.CAMERA" })
     }
+
+    /**
+     * The same rule the permission kinds have, for the same reason: an undo
+     * that knows the app and the intent but not which op has nothing to act on.
+     */
+    @Test
+    fun `a special-access action must record which app op it changed`() {
+        val journal = ActionJournal(FakeLog())
+
+        val refused = assertThrows(IllegalArgumentException::class.java) {
+            journal.perform(
+                kind = ActionKind.REVOKE_SPECIAL_ACCESS,
+                packageName = "com.example.app",
+            ) { }
+        }
+        assertTrue(refused.message!!.contains("must record which app op"))
+    }
+
+    @Test
+    fun `an action that is not about an app op must not record one`() {
+        val journal = ActionJournal(FakeLog())
+
+        val refused = assertThrows(IllegalArgumentException::class.java) {
+            journal.perform(
+                kind = ActionKind.DISABLE,
+                packageName = "com.example.app",
+                appOp = "android:manage_external_storage",
+            ) { }
+        }
+        assertTrue(refused.message!!.contains("must not record an app op"))
+    }
+
+    /**
+     * Both previous modes are carried. An op can be held at uid or package
+     * level and restoring only one leaves state the phone never had - which
+     * happened on hardware before this field existed.
+     */
+    @Test
+    fun `a special-access action records both the package and uid modes`() {
+        val log = FakeLog()
+
+        ActionJournal(log).perform(
+            kind = ActionKind.REVOKE_SPECIAL_ACCESS,
+            packageName = "com.example.app",
+            previousState = 3,
+            previousUidState = 0,
+            appOp = "android:manage_external_storage",
+        ) { }
+
+        val attempt = log.entries.first()
+        assertEquals("android:manage_external_storage", attempt.appOp)
+        assertEquals(3, attempt.previousState)
+        assertEquals(0, attempt.previousUidState)
+    }
+
 }
