@@ -88,30 +88,72 @@ class DumpsysOnHardware {
         assertTrue("Expected lines, got: $reading", reading is DumpsysAccess.Reading.Lines)
         val lines = (reading as DumpsysAccess.Reading.Lines).lines
 
-        // Past the pipe buffer, which is the whole point of this test.
-        val bytes = lines.sumOf { it.length + 1 }
-        assertTrue(
-            "Expected a dump larger than a pipe buffer, got $bytes bytes - if this " +
-                "shrank, this test is no longer proving anything about deadlocking",
-            bytes > 64 * 1024,
-        )
 
         // Shape, not contents: what is on SAI's phone is SAI's business and
         // changes by the hour. What is pinned is that the structure the parser
         // stands on is still there.
+        //
+        // `Uid N:` blocks are the part every device has - stock Android 15
+        // emits 432 of them for an op no app has ever used - so this is the
+        // assertion that travels.
         assertTrue(
-            "Expected package headers in the dump",
-            lines.any { it.trim().startsWith("Package ") },
+            "This is not an appops dump at all: ${lines.take(3)}",
+            lines.any { it.trim().startsWith("Current AppOps Service state") } ||
+                lines.any { it.trim().startsWith("Uid ") },
         )
 
-        // And it parses into something, rather than into a pile of unreadable
-        // rows - the failure mode that would matter on a different OEM.
+        // A dump that parses into nothing readable is always a failure, on any
+        // device: `readNothing` means rows were seen and none could be read,
+        // which is the format having moved. Zero package blocks is a different
+        // answer - it is "nothing has used the microphone here", which is true
+        // on a fresh emulator and which `readNothing` deliberately does not
+        // claim.
         val parsed = AppOpLedger.parse(lines, AppOpLedger.Op.MICROPHONE)
         assertTrue(
             "Every record was unreadable, so the format has moved: $parsed",
             !parsed.readNothing,
         )
 
-        assertTrue("Reading 149 KB took ${tookMs}ms, which is too slow for a screen", tookMs < 5_000)
+        assertTrue("Reading the dump took ${tookMs}ms, which is too slow for a screen", tookMs < 5_000)
+
+        // -- premises about the device, not results about the code -----------
+        //
+        // Both of these are last on purpose: every assertion above has already
+        // run by the time either is reached, so a skip here still means the
+        // read, the shape, the parse and the timing were all proven.
+
+        // The parser proof proper needs at least one `Package` block to chew
+        // on, and whether one exists is a property of the device's history.
+        // Stock Android 15, 2026-09-14: zero for RECORD_AUDIO and CAMERA, two
+        // for COARSE_LOCATION - same format, nothing recorded against it. So
+        // this is an assumption, and the format check above is the assertion.
+        assumeTrue(
+            "SKIPPED (the read, the shape and the parse all passed): no app on " +
+                "this device has a package-level microphone entry, so there is " +
+                "no row for the parser to prove itself on.",
+            lines.any { it.trim().startsWith("Package ") },
+        )
+
+        // Past the pipe buffer - and **last on purpose**, because it is a
+        // premise about the device, not a result about the code.
+        //
+        // How big this dump is depends on how many apps have touched the
+        // microphone, which is a property of the phone. On stock Android 15
+        // with a fresh image it was 50 KB, inside the buffer, and asserting
+        // turned "this device cannot prove the drain" into "the drain is
+        // broken" - a different claim, and a false one (2026-09-14).
+        //
+        // Everything above has already run by the time this is reached, so the
+        // reading, the shape and the parse are still proven on a small dump;
+        // only the deadlock proof needs a device with enough history. On the
+        // Agni 2 it is ~149 KB and this holds.
+        val bytes = lines.sumOf { it.length + 1 }
+        assumeTrue(
+            "SKIPPED (everything except the deadlock proof passed): this device's " +
+                "microphone dump is $bytes bytes, inside a pipe's 64 KiB buffer, " +
+                "so it cannot show the concurrent drain. The drain is NOT " +
+                "verified here.",
+            bytes > 64 * 1024,
+        )
     }
 }

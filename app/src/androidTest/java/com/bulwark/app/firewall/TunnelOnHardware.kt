@@ -1,6 +1,7 @@
 package com.bulwark.app.firewall
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.bulwark.app.TestTargets
 import androidx.test.platform.app.InstrumentationRegistry
 import com.bulwark.app.policy.ActionJournal
 import com.bulwark.app.policy.FirewallActions
@@ -117,7 +118,10 @@ class TunnelOnHardware {
 
     private companion object {
         /** Approved by SAI, 2026-09-11. Not a parameter, on purpose. */
-        const val TARGET = "com.jio.myjio"
+        const val APPROVED_TARGET = "com.jio.myjio"
+
+        /** Emulator-only override; see [TestTargets]. Hardware always gets the constant. */
+        val TARGET: String get() = TestTargets.resolve(APPROVED_TARGET)
         const val WAIT_MS = 5_000L
         const val POLL_MS = 100L
     }

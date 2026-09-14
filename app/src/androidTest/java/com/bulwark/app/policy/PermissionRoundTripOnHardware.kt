@@ -1,6 +1,7 @@
 package com.bulwark.app.policy
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.bulwark.app.TestTargets
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assume.assumeTrue
 import com.bulwark.app.shizuku.RuntimePermissionAccess
@@ -71,17 +72,39 @@ class PermissionRoundTripOnHardware {
         )
     }
 
+    /**
+     * The target has to be on the device before anything can be said about it.
+     *
+     * Absent, this crashed with `getPackageInfo returned nothing for
+     * com.jio.myjio` on stock Android 15, 2026-09-14 - which reads like the
+     * privileged path is broken when in fact the platform was fine and the
+     * phone-specific package simply was not installed. A test that cannot tell
+     * those two apart reports the wrong one.
+     */
+    private fun requireTargetPresent() {
+        val present = runCatching { RuntimePermissionAccess.isGranted(TARGET, PERMISSION) }
+            .isSuccess
+        assumeTrue("SKIPPED: $TARGET is not on this device", present)
+    }
+
     @Test
     fun revokeAndRestoreOnTheApprovedTarget() {
         requireDeliberateRun()
+        requireTargetPresent()
         val actions = PermissionActions(ActionJournal(SqliteActionLog(context)))
 
         assertTrue(
             "no permission API resolved on this device; nothing below can run",
             RuntimePermissionAccess.canChangePermissions,
         )
-        assertTrue(
-            "$TARGET must hold $PERMISSION before this can test taking it away",
+        // A premise about the device, so a skip - the same shape as the batch
+        // test below, which has always skipped when its target held none of
+        // its list. Asserting here said "the revoke path is broken" on any
+        // device whose target simply does not hold location, which is a
+        // different claim and a false one.
+        assumeTrue(
+            "SKIPPED: $TARGET does not hold $PERMISSION, so there is nothing " +
+                "to take away",
             RuntimePermissionAccess.isGranted(TARGET, PERMISSION),
         )
 
@@ -134,6 +157,7 @@ class PermissionRoundTripOnHardware {
     @Test
     fun severalChangesAndTheBatchPathOnTheApprovedTarget() {
         requireDeliberateRun()
+        requireTargetPresent()
         val actions = PermissionActions(ActionJournal(SqliteActionLog(context)))
 
         val held = BATCH.filter { RuntimePermissionAccess.isGranted(TARGET, it) }
@@ -180,8 +204,16 @@ class PermissionRoundTripOnHardware {
     }
 
     private companion object {
-        /** Approved by SAI, 2026-09-11. Not a parameter, on purpose. */
-        const val TARGET = "com.jio.myjio"
+        /** Approved by SAI, 2026-09-11. */
+        const val APPROVED_TARGET = "com.jio.myjio"
+
+        /**
+         * Still not a parameter on hardware - `TestTargets.resolve` returns
+         * [APPROVED_TARGET] unconditionally on a real phone, and honours
+         * `-e bulwark.target` only on an emulator, where the device is
+         * disposable and `com.jio.myjio` does not exist.
+         */
+        val TARGET: String get() = TestTargets.resolve(APPROVED_TARGET)
 
         /**
          * Granted and `USER_SET` on this device, so it is a user's own choice

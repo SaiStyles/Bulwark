@@ -194,7 +194,15 @@ class AppOpWriteOnHardware {
 
         val service = appOpsService()
         val code = opCode(ALL_FILES)
-        val uid = privilegedUidOf(JIO)
+
+        // Absent target is a skip, not a failure. It crashed here with an
+        // opaque "Could not read the uid" on stock Android 15, 2026-09-14:
+        // the app-op path was fine, only the phone-specific package was
+        // missing. A test that cannot tell "this platform is broken" from
+        // "this package is not installed" reports the wrong one of the two.
+        val jioUid = runCatching { privilegedUidOf(JIO) }.getOrNull()
+        assumeTrue("SKIPPED: $JIO is not on this device", jioUid != null)
+        val uid = jioUid!!
 
         val before = checkOperation(service, code, uid, JIO)
         assumeTrue(
