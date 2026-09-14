@@ -205,11 +205,13 @@ class SpecialAccessActionsTest {
      */
     @Test
     fun `giving it back restores both entries as they were, not as allowed`() {
-        val access = FakeAccess(packageEntry = 3, uidModeValue = 1)
+        val access = FakeAccess(packageEntry = 1, uidModeValue = 1)
         val (actions, log) = journalAnd(access)
 
         actions.giveBack(APP, ALL_FILES, previousPackageMode = 3, previousUidMode = 0)
 
+        // Both moved, so both are written - and to the recorded values, not to
+        // MODE_ALLOWED.
         assertEquals(listOf("uid:$UID:0", "package:$APP:3"), access.writes)
         assertEquals(ActionKind.GRANT_SPECIAL_ACCESS, log.entries.first().kind)
         assertEquals(
@@ -288,8 +290,30 @@ class SpecialAccessActionsTest {
 
         runCatching { actions.giveBack(APP, ALL_FILES, previousPackageMode = 0, previousUidMode = 1) }
 
-        // The two recorded writes, and nothing else - no MODE_ALLOWED rescue.
-        assertEquals(listOf("uid:$UID:1", "package:$APP:0"), access.writes)
+        // Both doors already hold the recorded values, so nothing is written at
+        // all - and crucially there is no MODE_ALLOWED rescue afterwards.
+        assertTrue("no door should have been written", access.writes.isEmpty())
+    }
+
+
+    /**
+     * A door already holding the right value is left alone.
+     *
+     * Writing `MODE_DEFAULT` to a uid entry that does not exist *creates* one,
+     * recording "no override" where the phone had nothing. Inert, and still not
+     * the state it was in - found on hardware after an otherwise exact
+     * clipboard round trip, 2026-09-14.
+     */
+    @Test
+    fun `an undo does not write a door that is already correct`() {
+        // Package-held and already revoked; the uid entry never existed.
+        val access = FakeAccess(packageEntry = 1, uidModeValue = 3)
+        val (actions, _) = journalAnd(access)
+
+        actions.giveBack(APP, ALL_FILES, previousPackageMode = 0, previousUidMode = 3)
+
+        // The package door only. No uid entry is invented.
+        assertEquals(listOf("package:$APP:0"), access.writes)
     }
 
 }

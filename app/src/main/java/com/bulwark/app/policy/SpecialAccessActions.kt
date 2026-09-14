@@ -146,10 +146,21 @@ class SpecialAccessActions(
             previousUidState = access.uidMode(code, uid),
             appOp = opName,
         ) {
-            // Both entries, each back to what it was. Order does not matter -
-            // neither is read until the next `checkOperation`.
-            access.setUidMode(code, uid, previousUidMode)
-            access.setPackageMode(code, uid, packageName, previousPackageMode)
+            // Each entry back to what it was - and **only if it moved**.
+            //
+            // Writing a door that is already correct is not free: setting the
+            // uid entry to MODE_DEFAULT records an entry saying "no override"
+            // where the phone had no entry at all. Inert, since default is
+            // default and `doorFor` still reads PACKAGE, but it is not the
+            // state the phone was in, and this class exists to put things back
+            // rather than to put them somewhere equivalent. Seen on hardware
+            // 2026-09-14 after an otherwise perfect clipboard round trip.
+            if (access.uidMode(code, uid) != previousUidMode) {
+                access.setUidMode(code, uid, previousUidMode)
+            }
+            if (access.packageMode(code, uid, packageName) != previousPackageMode) {
+                access.setPackageMode(code, uid, packageName, previousPackageMode)
+            }
             confirmGiven(code, uid, packageName)
         }
     }
