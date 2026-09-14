@@ -1,7 +1,11 @@
 package com.bulwark.app.security
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import android.content.pm.PackageManager
 import androidx.test.platform.app.InstrumentationRegistry
+import com.bulwark.app.shizuku.PrivilegedPackages
+import org.junit.Assume.assumeTrue
+import rikka.shizuku.Shizuku
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -101,6 +105,102 @@ class MonitoringIndicatorsOnDevice {
         val found = loaded.match(listOf(InstalledApp("com.systemservice", null)))
         assertEquals(1, found.size)
         assertTrue(found.single().names.isNotEmpty())
+    }
+
+    /**
+     * **The whole pipeline, end to end, against a real install.**
+     *
+     * Everything else here proves a piece: the matcher against fixtures, the
+     * asset against the bundled file, the certificate read against the binder.
+     * None of it proves they meet. This runs the real enumeration and the real
+     * privileged certificate read, and matches them with a list that names an
+     * app genuinely installed on this device.
+     *
+     * **The list is the only synthetic part**, which is deliberate: pointing a
+     * made-up list at a real app is one synthetic variable, where installing a
+     * fake APK named after real stalkerware would be two - and would leave a
+     * package called `com.systemservice` sitting on a machine.
+     *
+     * Bulwark is the target because its certificate is the one already checked
+     * against `keytool` by an independent route.
+     */
+    @Test
+    fun aRealInstalledAppIsFoundByBothSignalsThroughTheRealReads() {
+        assumeTrue(
+            "SKIPPED: Shizuku is not running, so the certificate read is unavailable.",
+            runCatching {
+                Shizuku.pingBinder() &&
+                    Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+            }.getOrDefault(false),
+        )
+
+        val certificates = PrivilegedPackages.signingCertificates()
+        val self = appContext.packageName
+        val ownCertificate = certificates[self]
+        assertNotNull("the certificate read did not return this package", ownCertificate)
+
+        val installed = PrivilegedPackages.listDetailed().map {
+            InstalledApp(it.packageName, certificates[it.packageName])
+        }
+        assertTrue("nothing was enumerated", installed.size > 1)
+
+        // Named by package AND by the certificate actually read off the device.
+        val list = MonitoringIndicators(
+            listOf(
+                MonitoringIndicator(
+                    name = "SyntheticEntry",
+                    kind = MonitoringKind.STALKERWARE,
+                    packages = setOf(self),
+                    certificates = setOf(ownCertificate!!),
+                ),
+            ),
+        )
+
+        val found = list.match(installed).single { it.packageName == self }
+        assertEquals(
+            "both signals must fire: the package name matched and the certificate " +
+                "read off this device matched the one in the list",
+            setOf(MatchSignal.PACKAGE_NAME, MatchSignal.SIGNING_CERTIFICATE),
+            found.signals,
+        )
+        assertEquals(listOf("SyntheticEntry"), found.names)
+    }
+
+    /**
+     * The rename case, through the real reads.
+     *
+     * A list that knows only the certificate still finds the app, which is the
+     * entire reason certificates are carried: a renamed build has a package
+     * name in no list on earth.
+     */
+    @Test
+    fun aCertificateOnlyEntryStillFindsARealInstalledApp() {
+        assumeTrue(
+            "SKIPPED: Shizuku is not running, so the certificate read is unavailable.",
+            runCatching {
+                Shizuku.pingBinder() &&
+                    Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+            }.getOrDefault(false),
+        )
+
+        val certificates = PrivilegedPackages.signingCertificates()
+        val self = appContext.packageName
+        val ownCertificate = certificates[self] ?: error("no certificate for $self")
+
+        val list = MonitoringIndicators(
+            listOf(
+                MonitoringIndicator(
+                    name = "RenamedBuild",
+                    kind = MonitoringKind.STALKERWARE,
+                    // Deliberately the wrong name, the right key.
+                    packages = setOf("com.example.not.installed"),
+                    certificates = setOf(ownCertificate),
+                ),
+            ),
+        )
+
+        val found = list.match(listOf(InstalledApp(self, ownCertificate))).single()
+        assertEquals(setOf(MatchSignal.SIGNING_CERTIFICATE), found.signals)
     }
 
     /**

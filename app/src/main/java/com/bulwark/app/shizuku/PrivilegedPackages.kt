@@ -40,6 +40,12 @@ object PrivilegedPackages {
     private const val MATCH_UNINSTALLED = PackageManager.MATCH_UNINSTALLED_PACKAGES.toLong()
 
     /**
+     * `PackageManager.GET_SIGNATURES`. Deprecated for ordinary apps and still
+     * the flag that fills the flat `signatures` array this reads.
+     */
+    private const val GET_SIGNATURES = PackageManager.GET_SIGNATURES.toLong()
+
+    /**
      * Package names visible to uid 2000.
      *
      * @param userId Android user. 0 is primary; a device with a Private Space
@@ -53,10 +59,58 @@ object PrivilegedPackages {
             info.javaClass.getField("packageName").get(info) as? String
         }
 
+    /**
+     * SHA-1 of each installed package's signing certificate, lower-case hex.
+     *
+     * **A separate call, not a field on [Installed], and that is a measured
+     * decision rather than a preference.** On stock Android 15, 2026-09-14:
+     * asking `getInstalledPackages` for signatures costs **2 ms** because they
+     * arrive in the same round trip, while hashing all 244 costs **41 ms** of
+     * CPU. Every enumeration in Bulwark goes through [listDetailed] - the
+     * package list, the audit, the firewall's system check - so a certificate
+     * field there would charge all of them for work none of them uses. One
+     * screen paying it once is a different thing from every screen paying it
+     * always. Numbers in `context/devices/aosp-emulator.md`.
+     *
+     * **SHA-1 because that is what the indicator lists publish**, in 40-hex
+     * form. Not a security choice: SHA-1 is weak against collisions and nothing
+     * here rests on that. Computing SHA-256 instead - the reasonable modern
+     * default, and the first thing this did - would compare two values that can
+     * never be equal, matching nothing on every phone while every test stayed
+     * green.
+     *
+     * `signatures` rather than `signingInfo`'s rotation history: the lists
+     * publish the certificate a sample was signed with, which is the flat
+     * value. Rotation is a refinement, and guessing wrong fails silently.
+     *
+     * A package whose signature cannot be read is **absent from the map**, not
+     * present with a null - a caller must not be able to mistake "unreadable"
+     * for "no certificate".
+     *
+     * @throws Exception if the privileged call fails, like every read here.
+     */
+    @Suppress("DEPRECATION")
+    fun signingCertificates(userId: Int = 0): Map<String, String> {
+        val digest = java.security.MessageDigest.getInstance("SHA-1")
+        val out = HashMap<String, String>()
+        rawPackageInfos(includeUninstalled = false, userId = userId, extraFlags = GET_SIGNATURES)
+            .forEach { info ->
+                val packageInfo = info as? android.content.pm.PackageInfo ?: return@forEach
+                val bytes = packageInfo.signatures?.firstOrNull()?.toByteArray() ?: return@forEach
+                out[packageInfo.packageName] =
+                    digest.digest(bytes).joinToString("") { "%02x".format(it) }
+            }
+        return out
+    }
+
     @Suppress("UNCHECKED_CAST")
-    private fun rawPackageInfos(includeUninstalled: Boolean, userId: Int): List<Any> {
+    private fun rawPackageInfos(
+        includeUninstalled: Boolean,
+        userId: Int,
+        extraFlags: Long = 0L,
+    ): List<Any> {
         val service = PrivilegedBinder.packageManager()
-        val flags = if (includeUninstalled) MATCH_UNINSTALLED else 0L
+        val flags = (if (includeUninstalled) MATCH_UNINSTALLED else 0L) or extraFlags
 
         // getInstalledPackages takes long flags from API 33, int before it.
         // minSdk is 26, so both are live in our supported range.
