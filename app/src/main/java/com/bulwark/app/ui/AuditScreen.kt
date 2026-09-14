@@ -962,11 +962,15 @@ private fun HiddenSwitchCard(
                     }
                     val shown = if (expanded) holders else holders.take(HIDDEN_SWITCH_ROWS)
                     shown.forEach { holder ->
+                        // Same block shape as the access list: the package name
+                        // opens it, its switches are indented under it. Two
+                        // lists on one screen that indent differently read as
+                        // two conventions, and a reader has to learn both.
                         Text(
                             holder.packageName,
                             style = MaterialTheme.typography.bodyMedium,
                             fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.padding(top = 8.dp),
+                            modifier = Modifier.padding(top = 14.dp),
                         )
                         holder.switches.sortedBy { it.name }.forEach { switch ->
                             val isBusy = busy == holder.packageName to switch
@@ -979,6 +983,7 @@ private fun HiddenSwitchCard(
                             // as full rather than as a list. Same information,
                             // half the height.
                             Row(
+                                modifier = Modifier.padding(start = 14.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {

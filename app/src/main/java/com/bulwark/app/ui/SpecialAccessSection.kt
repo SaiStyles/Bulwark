@@ -143,8 +143,19 @@ private fun AccessRow(
     onRevoke: ((AppAccess, Access) -> Unit)? = null,
     busy: Pair<String, Access>? = null,
 ) {
+    // **One app, one block, and its details live inside it.**
+    //
+    // Everything here used to sit at the same left edge - the package name, the
+    // origin, each capability, the caution - so nothing said which app a line
+    // belonged to. Eleven apps deep that is not a list, it is a paragraph of
+    // package names.
+    //
+    // The parent is the name; the rest is indented under it, the way a block is
+    // indented under the statement that opens it. Tight inside a block,
+    // generous between them, which is the whole of the hierarchy - no box, no
+    // rule, no second card inside the card.
     Column(
-        Modifier.padding(top = 8.dp),
+        Modifier.padding(top = 14.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -167,6 +178,10 @@ private fun AccessRow(
             )
         }
 
+        Column(
+            Modifier.padding(start = CHILD_INDENT),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
         Text(app.originLabel, style = MaterialTheme.typography.labelSmall)
 
         app.accesses.sortedBy { it.name }.forEach { access ->
@@ -216,5 +231,16 @@ private fun AccessRow(
                 )
             }
         }
+        }
     }
 }
+
+/**
+ * How far an app's details sit inside the app they belong to.
+ *
+ * One step, the same everywhere, so the eye can find the left edge of a block
+ * without counting. Wide enough to read as containment at a glance and narrow
+ * enough that the sentences keep their width on a phone - the detail lines are
+ * full sentences and `design.md` rule 6 gives copy its room.
+ */
+private val CHILD_INDENT = 14.dp
