@@ -1,0 +1,39 @@
+stalkerware-iocs.json is derived from Echap's stalkerware-indicators:
+
+  https://github.com/Te-k/stalkerware-indicators
+  ioc.yaml (stalkerware) and watchware.yaml (watchware)
+  Licence: CC-BY 4.0 (attribution required; compatible with Bulwark's GPLv3)
+  Snapshot taken: 2026-09-14
+
+Regenerate with, from the repo root:
+
+  python tools/build-stalkerware-iocs.py ioc.yaml watchware.yaml
+
+Field names are shortened to keep the asset small; nothing is altered:
+  n = name          (what the tool calls itself)
+  t = type          ("stalkerware" | "watchware")
+  p = packages      (Android package names)
+  c = certificates  (signing certificate SHA-1, lower-case hex)
+
+Upstream carries more than this: C2 domains, distribution URLs, websites, iOS
+bundle ids, and two fuzzy certificate matches. Bulwark ships none of them, and
+tools/build-stalkerware-iocs.py says why for each. Bytes we would never read
+are bytes a user carries for nothing.
+
+Counts at this snapshot, printed by the script:
+  158 of 174 upstream entries are matchable by package name or certificate
+  16 carry neither, so nothing here can recognise them
+  641 distinct packages, 484 distinct certificates
+
+That 16 is not a rounding error, it is coverage Bulwark does not have, and the
+screen has to say so. "Nothing found" is never proof that nothing is there.
+
+**Stalkerware and watchware are kept apart deliberately.** Upstream separates
+them by file and so does this. Watchware is parental-control and employee-
+monitoring software: often installed openly, often by someone entitled to do
+it. Telling a person that is stalkerware is its own harm, and so is the
+reverse.
+
+This is years of careful work by people who do it for the people it protects.
+Credit it in the app, not only here - and cite the Coalition Against
+Stalkerware rather than paraphrasing advice we are not qualified to give.
