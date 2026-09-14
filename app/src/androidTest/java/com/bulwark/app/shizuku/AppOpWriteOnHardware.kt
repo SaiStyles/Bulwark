@@ -91,6 +91,17 @@ class AppOpWriteOnHardware {
          */
         const val VIBRATE = "android:vibrate"
 
+        /**
+         * The one special access any pre-approved app actually holds on this
+         * phone: `com.jio.myjio` has all-files access, read 2026-09-14.
+         *
+         * The other three read `default` on both approved apps, most with a
+         * `rejectTime` - they asked and were refused, which is not the same as
+         * holding it and is not a useful target for a write.
+         */
+        const val ALL_FILES = "android:manage_external_storage"
+        const val JIO = "com.jio.myjio"
+
         const val APP_OPS_INTERFACE = "com.android.internal.app.IAppOpsService"
         const val APP_OPS_STUB = "com.android.internal.app.IAppOpsService\$Stub"
     }
@@ -153,6 +164,108 @@ class AppOpWriteOnHardware {
         assertEquals("The op was not put back as it was found", before, restored)
     }
 
+    /**
+     * The question the layer actually needs answered: can a **special access**
+     * be written on an app that genuinely holds one?
+     *
+     * `VIBRATE` on the easter egg proves the mechanism and nothing else. This
+     * is a real app, a real capability, and the op Bulwark would want to take
+     * away - so it is the first result that means anything for the feature.
+     *
+     * ## The trap this is written around
+     *
+     * The phone reports jio's all-files access as **`Uid mode:`**, not as a
+     * package mode. `setMode` sets the *package* entry, and a package entry
+     * does not necessarily override a uid-level one - so a package write could
+     * land, read back unchanged, and look exactly like the false negative
+     * `SYSTEM_ALERT_WINDOW` already produced. `setUidMode` is the other door,
+     * and this tries the package first and then the uid, reporting which one
+     * moved the answer.
+     *
+     * Restores in a `finally`, through both doors, and the restore is checked
+     * afterwards. If this ever leaves a mark, the manual undo is
+     * `cmd appops set --uid com.jio.myjio MANAGE_EXTERNAL_STORAGE allow`.
+     */
+    @Test
+    fun aSpecialAccessCanBeWrittenOnAnAppThatHoldsIt() {
+        requireShizuku()
+        requireDeliberateRun()
+
+        val service = appOpsService()
+        val code = opCode(ALL_FILES)
+        val uid = privilegedUidOf(JIO)
+
+        val before = checkOperation(service, code, uid, JIO)
+        assumeTrue(
+            "SKIPPED: $JIO does not hold all-files access on this phone " +
+                "(mode=$before), so there is nothing to take away.",
+            before == AppOpsManager.MODE_ALLOWED,
+        )
+
+        var afterPackageWrite: Int? = null
+        var afterUidWrite: Int? = null
+        try {
+            setMode(service, code, uid, JIO, AppOpsManager.MODE_IGNORED)
+            afterPackageWrite = checkOperation(service, code, uid, JIO)
+
+            if (afterPackageWrite == before) {
+                // The package door did nothing. Try the uid door before
+                // concluding anything - see the class note.
+                setUidMode(service, code, uid, AppOpsManager.MODE_IGNORED)
+                afterUidWrite = checkOperation(service, code, uid, JIO)
+            }
+        } finally {
+            // Both doors, always. This is a real app and a real capability.
+            //
+            // The **uid** door goes back to what was read; the **package** door
+            // goes back to MODE_DEFAULT, which is "no package override" - not
+            // to `before`. `checkOperation` reports the *effective* mode, and
+            // jio's effective allow comes from the uid entry while its package
+            // entry was unset. Restoring the effective value through the
+            // package door leaves an explicit `allow` where the phone had
+            // `default`: same access, different state, and this test does not
+            // get to leave even that behind. Found by diffing an independent
+            // `cmd appops get` either side of the first run.
+            runCatching { setUidMode(service, code, uid, before) }
+            runCatching { setMode(service, code, uid, JIO, AppOpsManager.MODE_DEFAULT) }
+        }
+
+        val restored = checkOperation(service, code, uid, JIO)
+        assertEquals(
+            "all-files access was NOT put back on $JIO - restore by hand with: " +
+                "cmd appops set --uid $JIO MANAGE_EXTERNAL_STORAGE allow",
+            before,
+            restored,
+        )
+
+        val landed = afterUidWrite ?: afterPackageWrite
+        assertEquals(
+            "Neither door moved it. before=$before package=$afterPackageWrite " +
+                "uid=$afterUidWrite",
+            AppOpsManager.MODE_IGNORED,
+            landed,
+        )
+
+        // **Which door mattered, asserted rather than assumed.** This is the
+        // part the feature has to know. `checkOperation` resolves the uid entry
+        // first and only falls through to the package entry when the uid one is
+        // MODE_DEFAULT - so for an op the phone reports as a `Uid mode:`, the
+        // package door writes something real and changes nothing anyone can
+        // observe. Exactly the shape of the false negative already recorded
+        // above, one level deeper.
+        assertEquals(
+            "The package door moved a uid-mode op, so the note below is wrong " +
+                "and the feature can use setMode alone. package=$afterPackageWrite",
+            before,
+            afterPackageWrite,
+        )
+        assertEquals(
+            "The uid door is what landed it, and the feature needs setUidMode.",
+            AppOpsManager.MODE_IGNORED,
+            afterUidWrite,
+        )
+    }
+
     // -- the plumbing, duplicated here on purpose (see the class note) --------
 
     private fun appOpsService(): Any {
@@ -202,6 +315,13 @@ class AppOpWriteOnHardware {
     private fun setMode(service: Any, code: Int, uid: Int, packageName: String, mode: Int) {
         PrivilegedBinder.invokeHidden(
             Class.forName(APP_OPS_INTERFACE), service, "setMode", code, uid, packageName, mode,
+        )
+    }
+
+    /** The uid-level door, for ops the phone reports as a `Uid mode:`. */
+    private fun setUidMode(service: Any, code: Int, uid: Int, mode: Int) {
+        PrivilegedBinder.invokeHidden(
+            Class.forName(APP_OPS_INTERFACE), service, "setUidMode", code, uid, mode,
         )
     }
 }
