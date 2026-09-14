@@ -31,6 +31,14 @@ import java.security.MessageDigest
  * `conventions.md`: confirm the mechanism on hardware before writing feature
  * code. This is that confirmation and nothing else - it reads, hashes, and
  * asserts the shape. No IOC list, no matching, no screen.
+ *
+ * **Checked against a second route**, which is the rule a privileged read has
+ * earned here: on 2026-09-14 this produced
+ * `6046aafebcd3782ef7a1186007b84b1af6ff2d90` for `com.bulwark.app`, and
+ * `keytool -list -v` on the debug keystore independently reported
+ * `60:46:AA:FE:BC:D3:78:2E:F7:A1:18:60:07:B8:4B:1A:F6:FF:2D:90`. Two ways of
+ * asking, one answer. That value is machine-specific so it is recorded here
+ * rather than asserted - a CI box has a different debug key.
  */
 @RunWith(AndroidJUnit4::class)
 class SigningCertSpike {
@@ -63,7 +71,7 @@ class SigningCertSpike {
         )
 
         byPackage.values.forEach { hash ->
-            assertTrue("a SHA-256 is 64 hex characters, got '$hash'", hash.length == 64)
+            assertTrue("a SHA-1 is 40 hex characters, got '$hash'", hash.length == 40)
             assertTrue("must be hex: $hash", hash.all { it in "0123456789abcdef" })
         }
 
@@ -109,7 +117,7 @@ class SigningCertSpike {
         val list = PrivilegedBinder.invokeHidden(slice.javaClass, slice, "getList") as? List<*>
             ?: error("ParceledListSlice.getList returned null")
 
-        val digest = MessageDigest.getInstance("SHA-256")
+        val digest = MessageDigest.getInstance(CERTIFICATE_DIGEST)
         return list.filterIsInstance<PackageInfo>().mapNotNull { info ->
             val bytes = info.signatures?.firstOrNull()?.toByteArray() ?: return@mapNotNull null
             info.packageName to digest.digest(bytes).joinToString("") { "%02x".format(it) }
@@ -121,6 +129,22 @@ class SigningCertSpike {
 
         /** `PackageManager.GET_SIGNATURES`. Deprecated for apps; still the flat value. */
         const val GET_SIGNATURES = 64L
+
+        /**
+         * **SHA-1, because that is what the IOC list publishes.**
+         *
+         * The first version of this hashed SHA-256 - a reasonable modern
+         * default, and wrong. Echap's `ioc.yaml` carries 40-hex SHA-1
+         * fingerprints, so a SHA-256 comparison would have matched nothing,
+         * ever, while every test here still passed. That is the failure this
+         * file's own note warned about, caught by reading the dataset before
+         * writing the matcher rather than after.
+         *
+         * Not a security choice: SHA-1's weakness is collision resistance, and
+         * nothing here depends on that. It is an interoperability choice, and
+         * the format is the upstream's to set.
+         */
+        const val CERTIFICATE_DIGEST = "SHA-1"
 
         /** One Bulwark's own PackageManager cannot see, and two it can. */
         val TARGETS = listOf("com.android.settings", "com.android.chrome", "com.bulwark.app")
