@@ -335,9 +335,14 @@ class AuditContentTest {
             ),
         )
 
+        // Each node is scrolled to before it is asserted. Asserting two at once
+        // after one scroll assumes both fit on screen, which held on the
+        // emulator and failed on the Agni 2 - a smaller viewport, and a
+        // difference in the harness rather than in the app.
         scrollTo("been added to this phone")
         compose.onNodeWithText("1 certificate authority has been added to this phone.")
             .assertIsDisplayed()
+        scrollTo("Bulwark Test Interception CA")
         compose.onNodeWithText("Bulwark Test Interception CA").assertIsDisplayed()
     }
 
@@ -411,9 +416,13 @@ class AuditContentTest {
     fun aFindingWarnsBeforeItListsAnythingAndOffersNoRemoval() {
         render(fullyLoaded().copy(monitoring = listOf(FOUND), monitoringChecked = true))
 
+        // The safety note is long by design, so on a phone-sized screen the row
+        // below it is off the fold. Scroll to each, rather than shortening the
+        // warning to suit a test.
         scrollTo("can tell whoever installed it")
         compose.onNodeWithText("can tell whoever installed it", substring = true)
             .assertIsDisplayed()
+        scrollTo("com.systemservice")
         compose.onNodeWithText("com.systemservice").assertIsDisplayed()
         listOf("Remove", "Uninstall", "Delete", "Switch off").forEach {
             compose.onAllNodesWithText(it, substring = true).assertCountEquals(0)
