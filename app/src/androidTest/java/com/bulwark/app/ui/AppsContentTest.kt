@@ -145,9 +145,7 @@ class AppsContentTest {
             total = 2,
             offered = 2,
             refused = 0,
-            uninstallable = 0,
             unknown = 0,
-            recommended = 2,
         ),
         error = null,
         // Every job read, none unreadable: the labels are settled rather than

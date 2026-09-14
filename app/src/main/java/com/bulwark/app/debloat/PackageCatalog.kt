@@ -143,22 +143,38 @@ class PackageCatalog(private val database: UadDatabase) {
         )
     }
 
-    /** Counts for the UI header, so the user can see the shape of their device. */
+    /**
+     * Counts for the UI header, so the user can see the shape of their device.
+     *
+     * **Four, and each answers a different question.** There were six. Two were
+     * computed on every read and displayed nowhere, which is how a wrong fifth
+     * line gets born - the number is already sitting there, so someone adds a
+     * row for it.
+     *
+     * `uninstallable` counted everything not refused, which is what [offered]
+     * counts, because `canDisable` and `canUninstall` are both unconditionally
+     * true below. The header printed the same number twice until 2026-09-14.
+     * Deleting it is a better guarantee than the test that watched for it: a
+     * field that does not exist cannot be rendered.
+     *
+     * `recommended` counted packages the community database rates
+     * "Recommended". That rating gated uninstall until 2026-09-12 and was
+     * removed with the badges - *a stranger's verdict deciding what the owner
+     * of the phone was allowed to want*. It is rendered nowhere in the app now,
+     * and a pre-computed count of it on the header was the obvious way for that
+     * verdict to come back wearing Bulwark's own voice.
+     */
     fun summarise(entries: List<CatalogEntry>): Summary = Summary(
         total = entries.size,
         offered = entries.count { it.isOffered },
         refused = entries.count { it.options.isRefused },
-        uninstallable = entries.count { it.options.canUninstall },
         unknown = entries.count { it.rating == RemovalRating.UNKNOWN && !it.options.isRefused },
-        recommended = entries.count { it.rating == RemovalRating.RECOMMENDED },
     )
 
     data class Summary(
         val total: Int,
         val offered: Int,
         val refused: Int,
-        val uninstallable: Int,
         val unknown: Int,
-        val recommended: Int,
     )
 }

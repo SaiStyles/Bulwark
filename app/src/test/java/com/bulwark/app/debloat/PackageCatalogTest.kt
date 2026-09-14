@@ -160,20 +160,6 @@ class PackageCatalogTest {
         // their own phone.
         assertEquals(s.total, s.offered + s.refused)
 
-        // **`offered` and `uninstallable` are the same count**, because
-        // `canDisable` and `canUninstall` are both unconditionally true for
-        // anything not refused. The Apps summary printed both, in different
-        // words, as though they were different facts - and credited the
-        // community database with the second one while the line under it said
-        // 119 of those packages are undocumented.
-        //
-        // Pinned here so the duplicate cannot come back wearing new copy: if
-        // these ever genuinely diverge, this fails and the screen may say so.
-        assertEquals(
-            "if these differ, the summary may print both - until then it must not",
-            s.offered,
-            s.uninstallable,
-        )
     }
 
     private fun entry(
