@@ -29,7 +29,7 @@ import com.bulwark.app.permissions.groupHeadline
 import com.bulwark.app.permissions.originLabelFor
 import com.bulwark.app.permissions.revocable
 import com.bulwark.app.permissions.wordsFor
-import com.bulwark.app.ui.theme.Incomplete
+import com.bulwark.app.ui.theme.bulwark
 
 /**
  * Who can hear you, who can see you, who can read your files.
@@ -102,12 +102,12 @@ fun PermissionAuditSection(
             Text(
                 REVOKE_IS_NOT_A_LOCK,
                 style = MaterialTheme.typography.bodySmall,
-                color = Incomplete,
+                color = MaterialTheme.bulwark.incomplete,
             )
 
             if (notice != null) {
                 Spacer()
-                Text(notice, style = MaterialTheme.typography.bodySmall, color = Incomplete)
+                Text(notice, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.bulwark.incomplete)
                 return@Column
             }
 
@@ -180,7 +180,7 @@ private fun PermissionGroup(
             // Said out loud rather than showing controls that might not work.
             "Checking which of these Bulwark can change…",
             style = MaterialTheme.typography.bodySmall,
-            color = Incomplete,
+            color = MaterialTheme.bulwark.incomplete,
         )
         return
     }
@@ -239,7 +239,7 @@ private fun HolderRow(
                 style = MaterialTheme.typography.bodySmall,
             )
             verdict.plainReason?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = Incomplete)
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.bulwark.incomplete)
             }
         }
     }

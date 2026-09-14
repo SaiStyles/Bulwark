@@ -17,15 +17,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import com.bulwark.app.ui.theme.CautionBackground
-import com.bulwark.app.ui.theme.CautionText
-import com.bulwark.app.ui.theme.Incomplete
-import com.bulwark.app.ui.theme.RatingAdvanced
-import com.bulwark.app.ui.theme.RatingExpert
-import com.bulwark.app.ui.theme.RatingRecommended
-import com.bulwark.app.ui.theme.RatingUnsafe
-import com.bulwark.app.ui.theme.Refused
-import com.bulwark.app.ui.theme.WorthLookingAt
 import androidx.compose.material3.TextButton
 import com.bulwark.app.permissions.Access
 import com.bulwark.app.permissions.AppAccess
@@ -38,6 +29,7 @@ import com.bulwark.app.permissions.originLabel
 import com.bulwark.app.permissions.unavailableLine
 import com.bulwark.app.permissions.attention
 import com.bulwark.app.permissions.combinations
+import com.bulwark.app.ui.theme.bulwark
 
 /**
  * What each app can actually do to you.
@@ -97,7 +89,7 @@ fun SpecialAccessSection(
             // Degrading honestly: a partial audit presented as complete is the
             // false sense of protection safety-rules.md calls worse than none.
             unavailableLine(unavailable)?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = Incomplete)
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.bulwark.incomplete)
             }
 
             // Above the per-app list: these are readings of the whole device,
@@ -119,7 +111,7 @@ fun SpecialAccessSection(
  */
 @Composable
 private fun RatFindingCard(finding: RatFinding) {
-    Card(colors = CardDefaults.cardColors(containerColor = CautionBackground)) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.bulwark.cautionContainer)) {
         Column(
             Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -127,17 +119,17 @@ private fun RatFindingCard(finding: RatFinding) {
             Text(
                 finding.headline,
                 style = MaterialTheme.typography.titleSmall,
-                color = CautionText,
+                color = MaterialTheme.bulwark.caution,
             )
             Text(
                 finding.innocentFirst,
                 style = MaterialTheme.typography.bodySmall,
-                color = CautionText,
+                color = MaterialTheme.bulwark.caution,
             )
             Text(
                 finding.whatWouldWorry,
                 style = MaterialTheme.typography.bodySmall,
-                color = CautionText,
+                color = MaterialTheme.bulwark.caution,
             )
         }
     }
@@ -162,7 +154,7 @@ private fun AccessRow(
                     color = Color.White,
                     modifier = Modifier
                         .clip(RoundedCornerShape(4.dp))
-                        .background(WorthLookingAt)
+                        .background(MaterialTheme.bulwark.worthLookingAt)
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                 )
             }
@@ -194,11 +186,11 @@ private fun AccessRow(
 
         // Minus anything a device-level finding above already explained.
         combinationsToShow(app, findings).forEach {
-            Card(colors = CardDefaults.cardColors(containerColor = CautionBackground)) {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.bulwark.cautionContainer)) {
                 Text(
                     it.why,
                     style = MaterialTheme.typography.bodySmall,
-                    color = CautionText,
+                    color = MaterialTheme.bulwark.caution,
                     modifier = Modifier.padding(10.dp),
                 )
             }

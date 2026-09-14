@@ -19,7 +19,7 @@ import com.bulwark.app.permissions.appPermissionSummary
 import com.bulwark.app.permissions.heldByApp
 import com.bulwark.app.permissions.revocable
 import com.bulwark.app.permissions.wordsFor
-import com.bulwark.app.ui.theme.Incomplete
+import com.bulwark.app.ui.theme.bulwark
 
 /**
  * What one app can do to you.
@@ -74,7 +74,7 @@ fun AppPermissionsSection(
             Text(
                 "Bulwark could not read this app's permissions. $failure",
                 style = MaterialTheme.typography.bodySmall,
-                color = Incomplete,
+                color = MaterialTheme.bulwark.incomplete,
             )
             return@Column
         }
@@ -83,7 +83,7 @@ fun AppPermissionsSection(
             Text(
                 "Reading…",
                 style = MaterialTheme.typography.bodySmall,
-                color = Incomplete,
+                color = MaterialTheme.bulwark.incomplete,
             )
             return@Column
         }
@@ -95,13 +95,13 @@ fun AppPermissionsSection(
             Text(
                 "It holds none of them right now.",
                 style = MaterialTheme.typography.bodySmall,
-                color = Incomplete,
+                color = MaterialTheme.bulwark.incomplete,
             )
         } else {
             Text(
                 REVOKE_IS_NOT_A_LOCK,
                 style = MaterialTheme.typography.bodySmall,
-                color = Incomplete,
+                color = MaterialTheme.bulwark.incomplete,
             )
             held.forEach { holding ->
                 HeldPermissionRow(
@@ -118,7 +118,7 @@ fun AppPermissionsSection(
             "Permissions granted when the app was installed are not listed. " +
                 "Nothing can switch those off, including Settings.",
             style = MaterialTheme.typography.bodySmall,
-            color = Incomplete,
+            color = MaterialTheme.bulwark.incomplete,
         )
     }
 }
@@ -155,7 +155,7 @@ private fun HeldPermissionRow(
             // button would have been. A greyed control with no explanation is
             // the app deciding for someone and not telling them.
             verdict.plainReason?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall, color = Incomplete)
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.bulwark.incomplete)
             }
         }
         if (verdict.isOffered) {

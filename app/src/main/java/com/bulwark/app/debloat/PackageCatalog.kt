@@ -121,10 +121,15 @@ class PackageCatalog(private val database: UadDatabase) {
                 "Nobody has documented this package. It may be specific to your " +
                     "phone. Turning it off is reversible, but do it one at a time " +
                     "so you can tell what changed."
+            // **Never the description again.** The row already prints
+            // `entry.description.readableDescription()` directly above this, so
+            // quoting it back under "Known to cause problems:" printed the same
+            // paragraph twice - visible on the Agni 2, 2026-09-14, where the
+            // `android` row said everything about framework-res and then said
+            // it again. A warning that only repeats what is already on screen
+            // is noise wearing a warning's colour.
             rating == RemovalRating.UNSAFE ->
-                entry?.description?.readableDescription()?.takeIf { it.isNotBlank() }
-                    ?.let { "Known to cause problems: $it" }
-                    ?: "The community database marks this unsafe to remove."
+                "The community database marks this unsafe to remove."
             rating == RemovalRating.EXPERT ->
                 "Only turn this off if you know what it does."
             else -> null

@@ -72,9 +72,7 @@ import com.bulwark.app.shizuku.ShizukuState
 import com.bulwark.app.shizuku.SpecialAccessReader
 import com.bulwark.app.shizuku.doneForNowHeadline
 import com.bulwark.app.shizuku.whatCanBeClosed
-import com.bulwark.app.ui.theme.CautionBackground
-import com.bulwark.app.ui.theme.CautionText
-import com.bulwark.app.ui.theme.Incomplete
+import com.bulwark.app.ui.theme.bulwark
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -204,6 +202,11 @@ fun AuditScreen(
     var lockdown by remember { mutableStateOf(false) }
     var reload by remember { mutableIntStateOf(0) }
 
+    // Returning from Android's own Settings re-reads everything. This screen
+    // sends people to certificate settings, Developer options and VPN settings,
+    // and without this it keeps stating what was true before they left.
+    val returns = rememberResumeTicker()
+
     val ready = state is ShizukuState.Ready
 
     fun report(outcome: ActionRunner.Outcome) {
@@ -282,7 +285,7 @@ fun AuditScreen(
     // `AndroidCAStore` is readable by any app, so this is the one audit that
     // works on first launch before anybody has been asked to set anything up.
     // Still off the main thread - it parses every certificate on the phone.
-    LaunchedEffect(reload) {
+    LaunchedEffect(reload, returns) {
         addedCertificates = withContext(Dispatchers.IO) {
             runCatching { AddedCertificates.read() }.getOrNull()
         }
@@ -295,7 +298,7 @@ fun AuditScreen(
     // `monitoring` stays null unless a check actually completed. An empty list
     // and a failed read render as different sentences, and getting that
     // backwards turns "could not check" into "nothing found".
-    LaunchedEffect(ready, reload) {
+    LaunchedEffect(ready, reload, returns) {
         if (!ready) {
             monitoring = null
             monitoringChecked = false
@@ -318,7 +321,7 @@ fun AuditScreen(
 
     // The switches Android gives no screen for. Needs Shizuku: these are app
     // ops, and reading who holds one is the same privileged call as the rest.
-    LaunchedEffect(ready, reload) {
+    LaunchedEffect(ready, reload, returns) {
         if (!ready) {
             hiddenSwitches = null
             hiddenSwitchesCouldNotTell = null
@@ -346,7 +349,7 @@ fun AuditScreen(
     }
 
     // The log is a database, so this reads it off the main thread.
-    LaunchedEffect(reload) {
+    LaunchedEffect(reload, returns) {
         interrupted = withContext(Dispatchers.IO) {
             runCatching { runner.interrupted() }.getOrDefault(emptyList())
         }
@@ -364,7 +367,7 @@ fun AuditScreen(
     // person always lands on: a sync that only ran if you happened to open
     // Audit would leave the blocks down for anyone who stayed on Apps. Opening
     // the app re-applies them; opening a tab does not have to.
-    LaunchedEffect(reload) {
+    LaunchedEffect(reload, returns) {
         val rules = withContext(Dispatchers.IO) {
             runCatching { runner.blockedNetworkApps() }.getOrDefault(emptySet())
         }
@@ -401,7 +404,7 @@ fun AuditScreen(
     // Deliberately without flags. Flags cost a binder call each and decide only
     // whether a row may be *offered*, which matters for the handful of rows a
     // user opens - not for the few thousand this sweep sees.
-    LaunchedEffect(ready, reload) {
+    LaunchedEffect(ready, reload, returns) {
         if (!ready) {
             // **Cleared, not kept.** Returning early here used to leave the
             // previous list on screen, so a phone whose Shizuku had died went on
@@ -835,7 +838,7 @@ private fun MonitoringCard(findings: List<MonitoringFinding>) {
             Text(
                 MONITORING_SAFETY_NOTE,
                 style = MaterialTheme.typography.bodySmall,
-                color = CautionText,
+                color = MaterialTheme.bulwark.caution,
                 modifier = Modifier.padding(vertical = 8.dp),
             )
 
@@ -933,13 +936,13 @@ private fun HiddenSwitchCard(
                     "Shizuku is not running. These are app ops, and reading who " +
                         "holds one needs the access Shizuku provides.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Incomplete,
+                    color = MaterialTheme.bulwark.incomplete,
                 )
 
                 holders == null && couldNotTell != null -> Text(
                     couldNotTell,
                     style = MaterialTheme.typography.bodySmall,
-                    color = Incomplete,
+                    color = MaterialTheme.bulwark.incomplete,
                 )
 
                 holders == null -> Text(
@@ -1024,8 +1027,8 @@ private fun FirewallCard(
     val working = state.isEnforcing && !lockdown
     val colors =
         if (working) CardDefaults.cardColors()
-        else CardDefaults.cardColors(containerColor = CautionBackground)
-    val textColour = if (working) Color.Unspecified else CautionText
+        else CardDefaults.cardColors(containerColor = MaterialTheme.bulwark.cautionContainer)
+    val textColour = if (working) Color.Unspecified else MaterialTheme.bulwark.caution
 
     Card(colors = colors) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -1163,26 +1166,26 @@ private fun InterruptedCard(packages: List<String>) {
     // safety-rules.md rule 6: on ambiguity, stop and report. Bulwark does not
     // know whether these applied and will not guess, so it says exactly that
     // rather than quietly "fixing" a change that may never have happened.
-    Card(colors = CardDefaults.cardColors(containerColor = CautionBackground)) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.bulwark.cautionContainer)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 "Bulwark was interrupted",
                 style = MaterialTheme.typography.titleSmall,
-                color = CautionText,
+                color = MaterialTheme.bulwark.caution,
             )
             Text(
                 "It was part-way through changing ${packages.size} app(s) and " +
                     "never recorded finishing. They may or may not have applied " +
                     "- Bulwark does not know, and will not guess. Check each one:",
                 style = MaterialTheme.typography.bodySmall,
-                color = CautionText,
+                color = MaterialTheme.bulwark.caution,
             )
             packages.forEach {
                 Text(
                     it,
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = FontFamily.Monospace,
-                    color = CautionText,
+                    color = MaterialTheme.bulwark.caution,
                 )
             }
         }

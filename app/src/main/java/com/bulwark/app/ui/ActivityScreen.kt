@@ -25,7 +25,7 @@ import com.bulwark.app.observability.LocationRequests
 import com.bulwark.app.observability.SensorRegistrations
 import com.bulwark.app.shizuku.DumpsysAccess
 import com.bulwark.app.shizuku.ShizukuState
-import com.bulwark.app.ui.theme.Incomplete
+import com.bulwark.app.ui.theme.bulwark
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -106,7 +106,11 @@ fun ActivityScreen(
     // Everything is cleared when Shizuku is not up. Data Bulwark cannot
     // re-read is a claim with no source - the same rule the permission sweep
     // follows.
-    LaunchedEffect(ready) {
+    // What apps did while you were not looking is, by definition, most stale
+    // the moment you come back.
+    val returns = rememberResumeTicker()
+
+    LaunchedEffect(ready, returns) {
         if (!ready) {
             ledger = null; ledgerCouldNotTell = null
             doze = null; dozeCouldNotTell = null
@@ -378,13 +382,13 @@ private fun <T> ObservationCard(
                 !shizukuReady -> Text(
                     unavailable,
                     style = MaterialTheme.typography.bodySmall,
-                    color = Incomplete,
+                    color = MaterialTheme.bulwark.incomplete,
                 )
 
                 loaded == null && couldNotTell != null -> Text(
                     couldNotTell,
                     style = MaterialTheme.typography.bodySmall,
-                    color = Incomplete,
+                    color = MaterialTheme.bulwark.incomplete,
                 )
 
                 loaded == null -> Text(
@@ -401,7 +405,7 @@ private fun <T> ObservationCard(
                     // never folded away: a short list read as complete is the
                     // false all-clear this screen exists to avoid.
                     couldNotTell?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = Incomplete)
+                        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.bulwark.incomplete)
                     }
                     // Capped, and the cap is **stated**. The sensor card ran
                     // to 47 rows on the Agni 2 - past the point where a list

@@ -51,7 +51,7 @@ import com.bulwark.app.shizuku.CriticalRoles
 import com.bulwark.app.shizuku.PrivilegedPackages
 import com.bulwark.app.shizuku.RuntimePermissionAccess
 import com.bulwark.app.shizuku.ShizukuState
-import com.bulwark.app.ui.theme.Refused
+import com.bulwark.app.ui.theme.bulwark
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -127,6 +127,10 @@ fun AppsScreen(
     var blockedApps by remember { mutableStateOf<Set<String>>(emptySet()) }
     var reload by remember { mutableIntStateOf(0) }
 
+    // An app disabled or uninstalled from Settings while Bulwark was in the
+    // background must not still be listed as it was.
+    val returns = rememberResumeTicker()
+
     val ready = state is ShizukuState.Ready
 
     fun report(outcome: ActionRunner.Outcome) {
@@ -162,13 +166,13 @@ fun AppsScreen(
     }
 
     // Queries several system services, so off the main thread like the rest.
-    LaunchedEffect(reload) {
+    LaunchedEffect(reload, returns) {
         roles = withContext(Dispatchers.IO) {
             runCatching { CriticalRoles.read(context) }.getOrNull()
         }
     }
 
-    LaunchedEffect(ready, reload) {
+    LaunchedEffect(ready, reload, returns) {
         if (!ready) return@LaunchedEffect
         try {
             val built = withContext(Dispatchers.IO) {
@@ -195,7 +199,7 @@ fun AppsScreen(
     // belongs to opening the app, not to opening a tab, and it happens in
     // MainActivity. Doing it here as well would re-apply on every reload of a
     // screen that has nothing to do with the firewall.
-    LaunchedEffect(reload) {
+    LaunchedEffect(reload, returns) {
         blockedApps = withContext(Dispatchers.IO) {
             runCatching { runner.blockedNetworkApps() }.getOrDefault(emptySet())
         }
@@ -346,7 +350,7 @@ private fun SummaryCard(s: PackageCatalog.Summary) {
             // yet, and a count that reads as an offer is a promise the app does
             // not keep. "Safe" was our word too; the rating belongs to the
             // community database, so say whose it is.
-            Text("${s.uninstallable} the database also rates removable — Bulwark cannot uninstall yet")
+            Text("${s.uninstallable} the database also rates safe to remove entirely")
             Text("${s.refused} Bulwark refuses — they break your way back")
             Text("${s.unknown} nobody has documented — still offered, and shown as unknown")
             Text(
@@ -598,7 +602,7 @@ private fun StandingBadge(standing: Standing) {
         color = Color.White,
         modifier = Modifier
             .clip(RoundedCornerShape(4.dp))
-            .background(Refused)
+            .background(MaterialTheme.bulwark.refused)
             .padding(horizontal = 6.dp, vertical = 2.dp),
     )
 }

@@ -21,7 +21,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.bulwark.app.permissions.wordsFor
-import com.bulwark.app.ui.theme.CautionText
 import com.bulwark.app.policy.Attribution
 import com.bulwark.app.policy.Change
 import com.bulwark.app.policy.canBeUndone
@@ -31,6 +30,7 @@ import com.bulwark.app.policy.ChangeKind
 import com.bulwark.app.policy.changesHeadline
 import com.bulwark.app.policy.describe
 import com.bulwark.app.policy.undoLabel
+import com.bulwark.app.ui.theme.bulwark
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -191,7 +191,7 @@ fun ChangesScreen(
                             "wherever you save it. If someone else can reach " +
                             "this phone, choose somewhere they cannot.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = CautionText,
+                        color = MaterialTheme.bulwark.caution,
                     )
                     TextButton(onClick = {
                         // Translated into the same Outcome the rest of the app
@@ -253,7 +253,7 @@ private fun ChangeRow(
             Text(
                 change.whyNoUndo(),
                 style = MaterialTheme.typography.bodySmall,
-                color = CautionText,
+                color = MaterialTheme.bulwark.caution,
             )
             return@Column
         }

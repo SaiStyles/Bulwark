@@ -77,7 +77,17 @@ class PackageCatalogTest {
         val r = c.build(listOf("com.android.mtp"), setOf("com.android.mtp")).single()
         assertTrue(r.options.canDisable)
         assertTrue(r.options.canUninstall)
-        assertTrue(r.options.warning!!.contains("MTP"))
+        // Still described - the row prints this.
+        assertTrue("the description must survive: ${r.description}", r.description!!.contains("MTP"))
+        // **And the warning must not be the description again.** It said
+        // "Known to cause problems: <the same paragraph>", which on the Agni 2
+        // printed everything about the package twice on one row. The warning's
+        // job is the database's verdict; the description's job is the detail.
+        assertTrue(r.options.warning!!.contains("unsafe to remove"))
+        assertFalse(
+            "the warning must not restate the description: ${r.options.warning}",
+            r.options.warning!!.contains("MTP"),
+        )
     }
 
     @Test
