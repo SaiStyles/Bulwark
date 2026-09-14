@@ -27,10 +27,29 @@ package com.bulwark.app.permissions
  * read the clipboard 20 hours before this was written, and jio 559 days
  * before, both recorded by the phone and shown to nobody.
  *
- * `WAKE_LOCK` and `RUN_ANY_IN_BACKGROUND` are the obvious next two and are
- * **not here yet**. Nothing in Android expects a user to withdraw them, so
- * what breaks is a genuine unknown, and `conventions.md` says to find that out
- * on an emulator rather than on the phone somebody depends on.
+ * ## The two obvious candidates, both measured and both refused
+ *
+ * `WAKE_LOCK` and `RUN_ANY_IN_BACKGROUND` were the next two on the list. They
+ * were taken away on a stock Android 15 emulator on 2026-09-14, which is what
+ * `conventions.md` says to do rather than guessing on somebody's phone, and
+ * **neither belongs here**:
+ *
+ * - **`RUN_ANY_IN_BACKGROUND` is not hidden.** Settings writes it directly -
+ *   App info -> App battery usage -> "Allow background usage", toggled off,
+ *   sets the op to `ignore`. It fails this file's one entry requirement, and
+ *   offering it would mean claiming to expose something Android already does.
+ *
+ * - **`WAKE_LOCK` is hidden, and denying it does nothing.** With the op at
+ *   `MODE_IGNORED` the platform records a `Reject:` and keeps the wake lock:
+ *   same `mWakeLockSummary`, same suspend blocker held. It is an accounting op
+ *   that `PowerManagerService` notes for battery attribution without gating on.
+ *   A switch that reports success and changes nothing is the overclaim
+ *   `threat-model.md` exists to forbid.
+ *
+ * Evidence and the re-run in `WakeLockDenialProbe`; the reasoning is in
+ * `context/layers/02-permissions/app-ops.md`. **Neither is a pending item.**
+ * A future op earns a place here by passing both tests: no screen in Settings,
+ * and a denial the platform actually enforces.
  */
 enum class HiddenSwitch(
     /** The platform's own op string. The stable half of the API. */

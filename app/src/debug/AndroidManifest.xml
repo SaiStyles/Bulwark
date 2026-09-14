@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug-only manifest additions. Never present in a release build.
+
+  `WAKE_LOCK` is here for one reason: `WakeLockDenialProbe` has to hold a real
+  wake lock in order to find out what taking the op away actually does, and an
+  app that does not declare the permission never reaches the op check at all -
+  it gets a SecurityException from the permission gate first (measured on stock
+  Android 15, 2026-09-14).
+
+  It is NOT in `main/AndroidManifest.xml` and must not be moved there.
+  Bulwark's shipped manifest is part of its security claim - see
+  `context/_shared/security.md` - and "a test is not a reason to widen
+  production visibility" (`conventions.md`) applies to permissions first of all.
+  The probe is a spike; this is the smallest footprint that lets it run.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+</manifest>
