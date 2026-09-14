@@ -331,9 +331,22 @@ class MonitoringCopyTest {
         assertNull(PLAIN.ambiguityNote())
     }
 
+    /**
+     * Whole sentences, not prefixes.
+     *
+     * The first version of this asserted `startsWith("1 app")`, which passed
+     * while the screen said "1 app on this phone **match** a known monitoring
+     * tool". A prefix assertion cannot see the verb, and nobody reads a prefix.
+     */
     @Test
     fun `one and many are both said in plain English`() {
-        assertTrue(monitoringHeadline(listOf(PLAIN)).startsWith("1 app"))
-        assertTrue(monitoringHeadline(listOf(PLAIN, DISPUTED)).startsWith("2 apps"))
+        assertEquals(
+            "1 app on this phone matches a known monitoring tool.",
+            monitoringHeadline(listOf(PLAIN)),
+        )
+        assertEquals(
+            "2 apps on this phone match a known monitoring tool.",
+            monitoringHeadline(listOf(PLAIN, DISPUTED)),
+        )
     }
 }

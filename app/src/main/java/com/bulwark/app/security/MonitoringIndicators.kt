@@ -209,8 +209,14 @@ fun monitoringHeadline(findings: List<MonitoringFinding>): String {
     if (findings.isEmpty()) {
         return "No app on this phone matches a known monitoring tool."
     }
-    val apps = if (findings.size == 1) "1 app" else "${findings.size} apps"
-    return "$apps on this phone match a known monitoring tool."
+    // Verb agreement, because "1 app ... match" shipped and was only caught by
+    // looking at a screenshot - the test asserted the sentence started with
+    // "1 app" and was blind to everything after it.
+    return if (findings.size == 1) {
+        "1 app on this phone matches a known monitoring tool."
+    } else {
+        "${findings.size} apps on this phone match a known monitoring tool."
+    }
 }
 
 /** The line under the headline. Null when there is nothing to qualify. */

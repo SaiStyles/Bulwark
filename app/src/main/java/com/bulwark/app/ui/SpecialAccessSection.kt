@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -169,24 +170,44 @@ private fun AccessRow(
         Text(app.originLabel, style = MaterialTheme.typography.labelSmall)
 
         app.accesses.sortedBy { it.name }.forEach { access ->
-            Text("• ${access.plainMeaning}", style = MaterialTheme.typography.bodySmall)
             // One control per access, and only where there is an app op behind
             // it. Accessibility, notification listening and device admin are
             // enrolments kept elsewhere: Bulwark can report them and cannot
             // switch them off, and an offer it cannot honour is the false sense
             // of protection `safety-rules.md` calls worse than none.
-            if (onRevoke != null && access.opName != null) {
-                val isBusy = busy == app.packageName to access
-                TextButton(
-                    enabled = !isBusy,
-                    onClick = { onRevoke(app, access) },
-                ) { Text(if (isBusy) "Taking it away…" else "Take this away") }
+            val actionable = onRevoke != null && access.opName != null
+            val isBusy = busy == app.packageName to access
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    access.plainMeaning,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f),
+                )
+                if (actionable) {
+                    TextButton(
+                        enabled = !isBusy,
+                        onClick = { onRevoke!!(app, access) },
+                    ) { Text(if (isBusy) "Stopping…" else "Stop") }
+                }
             }
         }
 
         // Minus anything a device-level finding above already explained.
         combinationsToShow(app, findings).forEach {
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.bulwark.cautionContainer)) {
+            // **A surface, not a card.** This was a `Card` inside the card that
+            // holds the whole audit - visible in the first screenshot anyone
+            // took of this screen, 2026-09-14. A card claims "this is one thing,
+            // and it is separable" (`design.md` rule 2); a warning about an app
+            // is neither, it belongs to the row above it. Nesting one also gave
+            // it elevation over its own parent, so the least separable thing on
+            // the screen looked like the most detachable.
+            Surface(
+                color = MaterialTheme.bulwark.cautionContainer,
+                shape = MaterialTheme.shapes.small,
+            ) {
                 Text(
                     it.why,
                     style = MaterialTheme.typography.bodySmall,

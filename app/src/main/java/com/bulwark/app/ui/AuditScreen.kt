@@ -5,6 +5,7 @@ import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -24,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -967,15 +969,29 @@ private fun HiddenSwitchCard(
                             modifier = Modifier.padding(top = 8.dp),
                         )
                         holder.switches.sortedBy { it.name }.forEach { switch ->
-                            Text(
-                                "• ${switch.plainMeaning}",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
                             val isBusy = busy == holder.packageName to switch
-                            TextButton(
-                                enabled = !isBusy,
-                                onClick = { onRevoke(holder, switch) },
-                            ) { Text(if (isBusy) "Taking it away…" else "Take this away") }
+                            // **Control on the line it governs, not under it.**
+                            // design.md rule 6 said the copy is the element and
+                            // the control goes below it. That held when a card
+                            // carried one sentence and one button; with eight
+                            // apps and two switches each it produced sixteen
+                            // orphaned buttons down the page, and the card read
+                            // as full rather than as a list. Same information,
+                            // half the height.
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Text(
+                                    switch.plainMeaning,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TextButton(
+                                    enabled = !isBusy,
+                                    onClick = { onRevoke(holder, switch) },
+                                ) { Text(if (isBusy) "Stopping…" else "Stop") }
+                            }
                         }
                     }
                     // The remainder used to be *stated* here and left there:

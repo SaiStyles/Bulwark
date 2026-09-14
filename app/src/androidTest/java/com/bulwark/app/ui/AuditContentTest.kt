@@ -196,9 +196,9 @@ class AuditContentTest {
         }
 
         // One control, not two: only the overlay app has an op behind it.
-        compose.onAllNodesWithText("Take this away").assertCountEquals(1)
+        compose.onAllNodesWithText("Stop").assertCountEquals(1)
 
-        compose.onNodeWithText("Take this away").performClick()
+        compose.onNodeWithText("Stop").performClick()
         assertEquals(listOf("com.example.overlay:DRAW_OVER_APPS"), tapped)
     }
 
