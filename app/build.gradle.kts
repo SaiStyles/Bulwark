@@ -64,6 +64,23 @@ android {
 
     buildTypes {
         release {
+            // **No git metadata in the APK.** AGP writes
+            // META-INF/version-control-info.textproto with the commit that
+            // built it, which makes the binary depend on git state rather than
+            // on source. Two builds of identical code at different commits then
+            // differ - measured 2026-09-15, and it was the only one of 108
+            // entries that did.
+            //
+            // README tells people they can build this and compare it against a
+            // release. That has to hold for somebody working from a source
+            // tarball with no `.git`, or the promise is narrower than it reads.
+            // Provenance is carried by the published fingerprint and the
+            // release tag instead, neither of which a verifier has to
+            // reconstruct.
+            vcsInfo {
+                include = false
+            }
+
             // Null when no keystore.properties is present, which leaves the
             // APK unsigned rather than failing the build. A contributor
             // without the key can still build and test release.
