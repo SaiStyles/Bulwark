@@ -1,18 +1,22 @@
-# Bulwark
+<div align="center">
+
+<img src="brand/bulwark-logo.png" alt="Bulwark" width="280">
 
 **Take your phone back — without root, without unlocking the bootloader, without buying a different phone.**
-
-Bulwark removes preinstalled software, revokes permissions, cuts apps off the
-internet, and shows you what those apps did while you weren't looking. It runs
-on stock, locked, unrooted Android through
-[Shizuku](https://github.com/RikkaApps/Shizuku), and it holds no `INTERNET`
-permission — so it could not phone home even if it wanted to.
 
 [![Download 0.1.1](https://img.shields.io/badge/download-0.1.1-3DDC84.svg)](https://github.com/SaiStyles/Bulwark/releases/latest)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Android 8.0+](https://img.shields.io/badge/Android-8.0%2B-3DDC84.svg)](#getting-started)
 [![Kotlin](https://img.shields.io/badge/Kotlin-Compose-7F52FF.svg)](#how-it-is-built)
 [![No network permission](https://img.shields.io/badge/INTERNET%20permission-none-success.svg)](#verify-it-instead-of-trusting-it)
+
+</div>
+
+Bulwark removes preinstalled software, revokes permissions, cuts apps off the
+internet, and shows you what those apps did while you weren't looking. It runs
+on stock, locked, unrooted Android through
+[Shizuku](https://github.com/RikkaApps/Shizuku), and it holds no `INTERNET`
+permission — so it could not phone home even if it wanted to.
 
 **[Download the latest release](https://github.com/SaiStyles/Bulwark/releases/latest)** —
 then [set up Shizuku](#getting-started), which Bulwark needs in order to do
