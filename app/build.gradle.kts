@@ -35,12 +35,18 @@ android {
         applicationId = "com.bulwark.app"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
+        versionCode = 2
 
         // **Not 1.0.** `ROADMAP.md` calls this v0.1 and nothing has shipped;
         // a first public build numbered 1.0 is a claim, and this app is careful
         // about claims everywhere else. Changed 2026-09-15.
-        versionName = "0.1"
+        //
+        // **0.1.1 because 0.1 told people their apps were blocked when they
+        // were not.** Two builds that behave differently must not carry the
+        // same number: the only way anyone can tell whether they are holding
+        // the one that lies is to read the version, and Android will not even
+        // offer the upgrade without a higher `versionCode`.
+        versionName = "0.1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
