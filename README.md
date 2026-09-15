@@ -38,9 +38,8 @@ enthusiast apps and a wiki:
 | Remove bloatware without root | Canta / Universal Android Debloater |
 | Lock down permissions for good | scattered, mostly manual |
 
-Most people will never find, install and wire together four tools. Bulwark's
-argument is integration — one app, one place, every change named and
-reversible.
+Bulwark does all four jobs in one app. Everything in one place, every change
+named, and every change reversible.
 
 ## What it does
 
