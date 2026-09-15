@@ -194,5 +194,32 @@ androidComponents {
         tasks.matching { it.name == assembleName }.configureEach {
             dependsOn(verify)
         }
+
+        // **Say it out loud when a release comes out unsigned.**
+        //
+        // Building without `keystore.properties` is allowed on purpose - a
+        // contributor with no key can still build and test release, and the
+        // alternative is a build that fails for everyone but the one person
+        // holding it. But the quiet version of that leniency is somebody
+        // handing out an unsigned APK and finding out later, which on an app
+        // asking for shell access is not a small mistake.
+        //
+        // A warning rather than a failure: the lenience is the point, the
+        // silence was the bug.
+        if (variant.buildType == "release" && !canSignRelease) {
+            tasks.matching { it.name == assembleName }.configureEach {
+                doLast {
+                    logger.warn("")
+                    logger.warn("  ****************************************************************")
+                    logger.warn("  *  THIS RELEASE APK IS UNSIGNED and cannot be distributed.     *")
+                    logger.warn("  *                                                              *")
+                    logger.warn("  *  No keystore.properties, or its storeFile does not exist.    *")
+                    logger.warn("  *  See keystore.properties.example. Restore the key, rebuild,  *")
+                    logger.warn("  *  and check the fingerprint before handing this to anyone.    *")
+                    logger.warn("  ****************************************************************")
+                    logger.warn("")
+                }
+            }
+        }
     }
 }
