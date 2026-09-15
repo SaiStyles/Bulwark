@@ -13,6 +13,7 @@ import com.bulwark.app.debloat.CatalogEntry
 import com.bulwark.app.debloat.Options
 import com.bulwark.app.debloat.PackageCatalog
 import com.bulwark.app.debloat.RemovalRating
+import com.bulwark.app.firewall.FirewallState
 import com.bulwark.app.shizuku.CriticalRoles
 import com.bulwark.app.ui.theme.BulwarkTheme
 import org.junit.Rule
@@ -98,10 +99,60 @@ class AppsContentTest {
      */
     @Test
     fun aBlockedAppOffersTheUndoAndNotTheBlock() {
-        render(loaded().copy(blockedApps = setOf("com.example.bloat")))
+        render(
+            loaded(
+                blocked = setOf("com.example.bloat"),
+                firewall = FirewallState.IN_FORCE,
+            )
+        )
 
         scrollTo("Blocked from the internet by Bulwark.")
         compose.onNodeWithText("Blocked from the internet by Bulwark.").assertIsDisplayed()
+    }
+
+    /**
+     * The regression from the first outside test, 2026-09-15.
+     *
+     * A rule existed and the row said "Blocked from the internet by Bulwark."
+     * while consent had never been granted, so nothing on the phone was
+     * stopping anything. The rule is a decision; only a live tunnel makes it
+     * true, and the row has to know the difference.
+     *
+     * Asserts the **absence** of the claim as well as the presence of the
+     * correction, because the failure was never a missing sentence - it was a
+     * present one that was false.
+     */
+    @Test
+    fun aRuleWithoutConsentIsNotCalledBlocked() {
+        render(
+            loaded(
+                blocked = setOf("com.example.bloat"),
+                firewall = FirewallState.NEEDS_CONSENT,
+            )
+        )
+
+        scrollTo("Set to block, but still online")
+        compose.onNodeWithText("Set to block, but still online", substring = true)
+            .assertIsDisplayed()
+        compose.onAllNodesWithText("Blocked from the internet by Bulwark.")
+            .assertCountEquals(0)
+    }
+
+    /** The same, for the state every reboot lands in. */
+    @Test
+    fun aRuleNothingIsEnforcingIsNotCalledBlocked() {
+        render(
+            loaded(
+                blocked = setOf("com.example.bloat"),
+                firewall = FirewallState.NOT_IN_FORCE,
+            )
+        )
+
+        scrollTo("Set to block, but still online")
+        compose.onNodeWithText("Set to block, but still online", substring = true)
+            .assertIsDisplayed()
+        compose.onAllNodesWithText("Blocked from the internet by Bulwark.")
+            .assertCountEquals(0)
     }
 
     @Test
@@ -134,7 +185,10 @@ class AppsContentTest {
             .performScrollToNode(hasText(text, substring = true))
     }
 
-    private fun loaded() = AppsReadings(
+    private fun loaded(
+        blocked: Set<String> = emptySet(),
+        firewall: FirewallState = FirewallState.NOTHING_BLOCKED,
+    ) = AppsReadings(
         entries = listOf(
             entry("com.example.bloat"),
             entry("com.example.tracker"),
@@ -149,7 +203,8 @@ class AppsContentTest {
         // Every job read, none unreadable: the labels are settled rather than
         // still being checked.
         roles = CriticalRoles.Reading(holders = emptyMap(), unreadable = emptySet()),
-        blockedApps = emptySet(),
+        blockedApps = blocked,
+        firewall = firewall,
         shizukuReady = true,
     )
 

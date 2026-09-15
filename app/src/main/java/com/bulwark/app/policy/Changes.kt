@@ -273,7 +273,15 @@ fun changesHeadline(changes: List<Change>): String {
         val gone = changes.count { it.kind == ChangeKind.UNINSTALLED }
         if (off > 0) add(if (off == 1) "1 app switched off" else "$off apps switched off")
         if (perms > 0) add(if (perms == 1) "1 permission taken" else "$perms permissions taken")
-        if (blocked > 0) add(if (blocked == 1) "1 app blocked" else "$blocked apps blocked")
+        // "set to block", not "blocked". This is a list of decisions Bulwark
+        // recorded, and whether any of them is in force is a different fact
+        // that lives on the firewall card. The other three kinds are safe to
+        // state flatly - a switched-off app stays switched off - and this one
+        // is not, because a rule survives a reboot and its enforcement does
+        // not. `lessons/claims.md`.
+        if (blocked > 0) {
+            add(if (blocked == 1) "1 app set to block" else "$blocked apps set to block")
+        }
         if (gone > 0) add(if (gone == 1) "1 app removed" else "$gone apps removed")
     }
     val total = if (changes.size == 1) "1 change" else "${changes.size} changes"

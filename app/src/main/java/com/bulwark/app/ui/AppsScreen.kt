@@ -36,6 +36,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import com.bulwark.app.firewall.Firewall
+import com.bulwark.app.firewall.FirewallState
+import com.bulwark.app.firewall.firewallState
 import com.bulwark.app.debloat.CatalogEntry
 import com.bulwark.app.debloat.PackageCatalog
 import com.bulwark.app.debloat.UadDatabase
@@ -74,6 +77,15 @@ data class AppsReadings(
      */
     val roles: CriticalRoles.Reading?,
     val blockedApps: Set<String>,
+    /**
+     * Whether those rules are actually in force, read fresh from the platform.
+     *
+     * Carried here because [blockedApps] on its own is a list of *decisions*,
+     * and a row that renders one as "Blocked from the internet" is making a
+     * claim about the phone that this screen had no way to check. It shipped
+     * making that claim anyway. See `ActionRunner.blockNetwork`.
+     */
+    val firewall: FirewallState,
     val shizukuReady: Boolean,
 )
 
@@ -122,6 +134,9 @@ fun AppsScreen(
     // rather than an all-clear.
     var roles by remember { mutableStateOf<CriticalRoles.Reading?>(null) }
     var blockedApps by remember { mutableStateOf<Set<String>>(emptySet()) }
+    // Starts at "nothing blocked" rather than at a guess about enforcement. No
+    // rules are known yet, so there is nothing to be right or wrong about.
+    var firewall by remember { mutableStateOf(FirewallState.NOTHING_BLOCKED) }
     var reload by remember { mutableIntStateOf(0) }
 
     // An app disabled or uninstalled from Settings while Bulwark was in the
@@ -196,10 +211,22 @@ fun AppsScreen(
     // belongs to opening the app, not to opening a tab, and it happens in
     // MainActivity. Doing it here as well would re-apply on every reload of a
     // screen that has nothing to do with the firewall.
+    //
+    // The two facts beside the rules are read in the same breath, because a
+    // rule and its enforcement are only ever shown together. Both come from
+    // the platform, never from what Bulwark last asked for - `FirewallStatus`
+    // is explicit that this is the reading most likely to be wrong in the
+    // direction that hurts.
     LaunchedEffect(reload, returns) {
-        blockedApps = withContext(Dispatchers.IO) {
+        val rules = withContext(Dispatchers.IO) {
             runCatching { runner.blockedNetworkApps() }.getOrDefault(emptySet())
         }
+        blockedApps = rules
+        firewall = firewallState(
+            ruleCount = rules.size,
+            consentNeeded = Firewall.needsConsent(context),
+            vpnUp = Firewall.ourTunnelIsUp(),
+        )
     }
 
     AppsContent(
@@ -209,6 +236,7 @@ fun AppsScreen(
             error = error,
             roles = roles,
             blockedApps = blockedApps,
+            firewall = firewall,
             shizukuReady = ready,
         ),
         actions = runner,
@@ -325,6 +353,7 @@ fun AppsContent(
                         ),
                         actions,
                         entry.packageName in readings.blockedApps,
+                        readings.firewall,
                         onOutcome,
                     )
                 }
@@ -370,6 +399,7 @@ private fun PackageRow(
     standing: Standing,
     actions: RowActions,
     isBlocked: Boolean,
+    firewall: FirewallState,
     onOutcome: (ActionRunner.Outcome) -> Unit,
 ) {
     var busy by remember(entry.packageName) { mutableStateOf(false) }
@@ -495,7 +525,19 @@ private fun PackageRow(
             // than switching it off and the never-remove list is applied
             // separately in FirewallActions.
             if (isBlocked) {
-                Reason("Blocked from the internet by Bulwark.")
+                // Says which of the two facts it has. "Blocked from the
+                // internet by Bulwark." was shown for any app with a rule,
+                // whether or not anything was enforcing it - the same lie the
+                // outcome message told, in the place a person goes back to
+                // later to check.
+                if (firewall.isEnforcing) {
+                    Reason("Blocked from the internet by Bulwark.")
+                } else {
+                    Reason(
+                        text = notEnforcedReason(firewall),
+                        color = MaterialTheme.bulwark.caution,
+                    )
+                }
                 OutlinedButton(
                     enabled = !busy,
                     onClick = {
@@ -608,6 +650,36 @@ private fun StandingBadge(standing: Standing) {
 }
 
 @Composable
-private fun Reason(text: String) {
-    Text(text, style = MaterialTheme.typography.bodySmall)
+private fun Reason(text: String, color: Color = Color.Unspecified) {
+    Text(text, style = MaterialTheme.typography.bodySmall, color = color)
+}
+
+/**
+ * What to say about a rule that nothing is currently enforcing.
+ *
+ * Every branch names the consequence - the app is still online - before it
+ * names the cause. Someone scanning this row needs to know they are not
+ * covered; why is the second thing they need, not the first.
+ *
+ * Deliberately short, and it does not repeat the firewall card's explanation.
+ * This is a badge on one row of a long list; the card on Audit is where the
+ * state is explained once and properly, which is why both of these point at it.
+ */
+private fun notEnforcedReason(state: FirewallState): String = when (state) {
+    FirewallState.NEEDS_CONSENT ->
+        "Set to block, but still online: Android has not approved Bulwark's " +
+            "tunnel yet. The firewall card on Audit will ask."
+
+    // Covers the reboot case, which is the common one, and says the thing that
+    // fixes it - which happens by itself on the next open.
+    FirewallState.NOT_IN_FORCE ->
+        "Set to block, but still online: nothing is enforcing it right now. " +
+            "The firewall card on Audit says why."
+
+    // NOTHING_BLOCKED cannot reach here - a row is only blocked when a rule
+    // exists - and IN_FORCE is the caller's other branch. Neither is guessed
+    // at: a sentence invented for a state that cannot happen is a sentence
+    // nobody will ever check.
+    FirewallState.NOTHING_BLOCKED, FirewallState.IN_FORCE ->
+        "Set to block. Whether anything is enforcing it is on the Audit screen."
 }

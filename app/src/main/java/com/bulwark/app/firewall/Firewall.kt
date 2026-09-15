@@ -66,6 +66,15 @@ object Firewall {
     fun ourTunnelIsUp(): Boolean = NetworkBlockService.isTunnelUp
 
     /**
+     * How many times the service has finished applying the rules.
+     *
+     * For callers that need to wait for their own [sync] to be answered before
+     * reading [ourTunnelIsUp] - see `NetworkBlockService.passes`. Nothing
+     * should display this number; it is a sequence, not a fact about the phone.
+     */
+    fun appliedPasses(): Long = NetworkBlockService.passes
+
+    /**
      * Whether Android has been told to keep Bulwark's tunnel up by itself.
      *
      * This is the only thing that closes the reboot gap: with it on, the system

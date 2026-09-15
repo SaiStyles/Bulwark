@@ -89,8 +89,22 @@ class NetworkBlockService : VpnService() {
         return START_STICKY
     }
 
-    /** Reads the rules and brings the tunnel into line with them. */
-    private fun applyRulesFromLog() {
+    /**
+     * Reads the rules and brings the tunnel into line with them.
+     *
+     * Counts itself in [passes] on the way out, however it leaves - including
+     * the paths where it gives up. A caller waiting to find out what happened
+     * has to be able to tell "not finished yet" from "finished, and the answer
+     * is no", and a counter that only advanced on success would leave it
+     * waiting forever for the one case worth reporting.
+     */
+    private fun applyRulesFromLog() = try {
+        applyRules()
+    } finally {
+        passes++
+    }
+
+    private fun applyRules() {
         val blocked = runCatching {
             ActionJournal(SqliteActionLog(applicationContext)).history().blockedPackages()
         }.getOrElse {
@@ -216,6 +230,21 @@ class NetworkBlockService : VpnService() {
          */
         @Volatile
         var isTunnelUp: Boolean = false
+            private set
+
+        /**
+         * How many times the service has finished reading the rules and acted
+         * on them. Monotonic for the life of the process.
+         *
+         * Exists so that "I asked for the tunnel" and "the tunnel answered"
+         * are separable. [isTunnelUp] alone cannot do that: blocking a second
+         * app while a tunnel is already up leaves it `true` right through the
+         * teardown and rebuild, so anything reading it straight after a sync
+         * gets last minute's answer and calls it this minute's. Wait for this
+         * to move, *then* read [isTunnelUp].
+         */
+        @Volatile
+        var passes: Long = 0L
             private set
 
         private const val TAG = "BulwarkFirewall"

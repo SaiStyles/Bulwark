@@ -412,6 +412,23 @@ class ActionRunner(
      * sense that matters - it takes a capability away and an app may break -
      * and `security.md` FIXED-11 applies here as everywhere: anything that can
      * press Bulwark's buttons holds shell by proxy.
+     *
+     * ## It reports what happened, not what was asked for
+     *
+     * **This said "Blocked X from the internet." unconditionally until
+     * 2026-09-15, and shipped that way.** The first person outside this project
+     * to use the app blocked something, was told it was blocked, went to look
+     * for Bulwark in Android's VPN settings, and found nothing there - because
+     * without consent `NetworkBlockService` cannot establish, logs one line,
+     * and stops itself. The app had told him he was covered while nothing on
+     * the phone was stopping a single packet.
+     *
+     * `FirewallStatus` is built entirely around keeping "you asked for this"
+     * and "this is happening" apart, and `safety-rules.md` calls a false sense
+     * of protection worse than none. The card obeyed both. This sentence - the
+     * one the person actually reads at the moment they act - obeyed neither,
+     * because nobody thought of an action outcome as a claim about the
+     * platform. It is one. So it is now measured like one.
      */
     override fun blockNetwork(
         packageName: String,
@@ -423,8 +440,27 @@ class ActionRunner(
         onOutcome = onOutcome,
     ) {
         firewall.block(packageName)
-        syncFirewall()
-        "Blocked $packageName from the internet."
+
+        // Consent is raised **here** and not in syncFirewall, and the two are
+        // different situations rather than one rule applied inconsistently.
+        // syncFirewall runs on every app launch, where the dialogue would be
+        // Bulwark demanding something nobody asked about. This runs because
+        // the person just pressed Block, and the tunnel is the thing they
+        // pressed it for - asking now is answering them, not ambushing them.
+        if (Firewall.needsConsent(activity)) {
+            activity.runOnUiThread { requestVpnConsent() }
+            return@authenticated "Set to block $packageName. It is still " +
+                "online: Android has to approve Bulwark's tunnel first, and " +
+                "it is asking you now."
+        }
+
+        if (syncAndAwaitTunnel()) {
+            "Blocked $packageName from the internet."
+        } else {
+            "Set to block $packageName, but the tunnel is not running, so it " +
+                "can still reach the internet. The firewall card on Audit " +
+                "says what is missing."
+        }
     }
 
     /** Lets it online again. The undo for [blockNetwork]. */
@@ -484,6 +520,36 @@ class ActionRunner(
             if (Firewall.needsConsent(activity)) return@launch
             Firewall.sync(activity)
         }
+    }
+
+    /**
+     * Applies the rules and waits to find out whether a tunnel came up.
+     *
+     * **Called only from `work`**, which `authenticated` already runs off the
+     * main thread, so the wait blocks a worker and never a frame. It is a wait
+     * rather than a callback because the service is a separate component whose
+     * answer arrives on its own thread; a listener between the two would be
+     * more machinery than this needs, and the bound is short.
+     *
+     * Waits for the pass counter to move before reading the tunnel, because
+     * reading it straight away answers a question about the *previous* tunnel
+     * - see `NetworkBlockService.passes`.
+     *
+     * A timeout returns false, which is the honest reading: nothing has been
+     * observed stopping this app, so nothing may be claimed. Understating
+     * protection is survivable; overstating it is the failure this whole
+     * method exists to prevent.
+     */
+    private fun syncAndAwaitTunnel(): Boolean {
+        val before = Firewall.appliedPasses()
+        Firewall.sync(activity)
+
+        val deadline = System.nanoTime() + APPLY_TIMEOUT_NANOS
+        while (System.nanoTime() < deadline) {
+            if (Firewall.appliedPasses() != before) return Firewall.ourTunnelIsUp()
+            Thread.sleep(APPLY_POLL_MILLIS)
+        }
+        return false
     }
 
     /**
@@ -562,5 +628,16 @@ class ActionRunner(
                 "confirm before changing anything, and without a screen lock " +
                 "there is nothing for it to ask - which also means another app " +
                 "could drive Bulwark without you noticing."
+
+        /**
+         * How long to wait for the service to answer a sync.
+         *
+         * Generous on purpose. Establishing a tunnel is fast, so this is not a
+         * budget for the normal case - it is headroom for a cold, busy or slow
+         * phone, so that a device being slow is never reported to its owner as
+         * a firewall that failed.
+         */
+        val APPLY_TIMEOUT_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(3)
+        const val APPLY_POLL_MILLIS = 25L
     }
 }

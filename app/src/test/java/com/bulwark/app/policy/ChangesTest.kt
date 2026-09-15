@@ -136,7 +136,10 @@ class ChangesTest {
 
         assertTrue(line, line.startsWith("3 changes:"))
         assertTrue(line, line.contains("2 apps switched off"))
-        assertTrue(line, line.contains("1 app blocked"))
+        // "set to block", never "blocked" - a rule is not its enforcement, and
+        // this headline has no way to know whether the tunnel is up.
+        assertTrue(line, line.contains("1 app set to block"))
+        assertTrue(line, !line.contains("1 app blocked"))
     }
 
     @Test
