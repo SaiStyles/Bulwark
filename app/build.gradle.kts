@@ -1,4 +1,23 @@
 import com.android.build.api.artifact.SingleArtifact
+import java.util.Properties
+
+/**
+ * Release signing, read from a file that is **never committed**.
+ *
+ * `keystore.properties` and the keystore it points at are gitignored. The key
+ * has to be generated offline and kept off CI - `ROADMAP.md` v1.0 - so nothing
+ * here creates one, and a checkout without it still builds: the release APK
+ * simply comes out unsigned, exactly as it did before this existed.
+ *
+ * See `keystore.properties.example` for the four keys.
+ */
+val signingProperties = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+val canSignRelease = signingProperties.getProperty("storeFile")?.let {
+    rootProject.file(it).exists()
+} == true
 
 plugins {
     alias(libs.plugins.android.application)
@@ -17,13 +36,39 @@ android {
         minSdk = 26
         targetSdk = 37
         versionCode = 1
-        versionName = "1.0"
+
+        // **Not 1.0.** `ROADMAP.md` calls this v0.1 and nothing has shipped;
+        // a first public build numbered 1.0 is a claim, and this app is careful
+        // about claims everywhere else. Changed 2026-09-15.
+        versionName = "0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            if (canSignRelease) {
+                storeFile = rootProject.file(signingProperties.getProperty("storeFile"))
+                storePassword = signingProperties.getProperty("storePassword")
+                keyAlias = signingProperties.getProperty("keyAlias")
+                keyPassword = signingProperties.getProperty("keyPassword")
+                // v1 is off: an APK a user sideloads on Android 8+ is verified
+                // by v2/v3, and leaving v1 on widens the signature surface for
+                // nothing. minSdk is 26.
+                enableV1Signing = false
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
+            // Null when no keystore.properties is present, which leaves the
+            // APK unsigned rather than failing the build. A contributor
+            // without the key can still build and test release.
+            signingConfig = if (canSignRelease) signingConfigs.getByName("release") else null
+
             // Code that is not in the APK cannot be exploited. Shrinking is a
             // security control here, not only a size one - see
             // context/_shared/security.md. Keep rules in proguard-rules.pro

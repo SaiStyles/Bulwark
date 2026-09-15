@@ -17,3 +17,8 @@
 
 # Local zip backups. Never committed - git history is the real backup.
 backup/
+
+# Release signing. The key is generated offline and never enters this repo -
+# see keystore.properties.example.
+/keystore.properties
+*.jks
