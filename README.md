@@ -8,10 +8,15 @@ on stock, locked, unrooted Android through
 [Shizuku](https://github.com/RikkaApps/Shizuku), and it holds no `INTERNET`
 permission — so it could not phone home even if it wanted to.
 
+[![Download 0.1.1](https://img.shields.io/badge/download-0.1.1-3DDC84.svg)](https://github.com/SaiStyles/Bulwark/releases/latest)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Android 8.0+](https://img.shields.io/badge/Android-8.0%2B-3DDC84.svg)](#getting-started)
 [![Kotlin](https://img.shields.io/badge/Kotlin-Compose-7F52FF.svg)](#how-it-is-built)
 [![No network permission](https://img.shields.io/badge/INTERNET%20permission-none-success.svg)](#verify-it-instead-of-trusting-it)
+
+**[Download the latest release](https://github.com/SaiStyles/Bulwark/releases/latest)** —
+then [set up Shizuku](#getting-started), which Bulwark needs in order to do
+anything.
 
 ---
 
@@ -119,7 +124,14 @@ adb shell sh /sdcard/Android/data/moe.shizuku.privileged.api/start.sh
 
 ### 3. Install Bulwark, then restart Shizuku
 
-**This order matters more than anything else on this page.**
+Get the APK from the
+[latest release](https://github.com/SaiStyles/Bulwark/releases/latest). Your
+phone will ask whether to allow installing from this source — that is Android
+doing its job, and it is worth
+[checking the signature](#verify-it-instead-of-trusting-it) first.
+
+**Then the part that matters more than anything else on this page: restart
+Shizuku afterwards.**
 
 Shizuku hands its authority to apps *at the moment its service starts*. An app
 installed afterwards gets nothing — and it does not fail loudly, it just sits
@@ -179,17 +191,38 @@ SHA-256  e3:cb:cb:02:2d:67:c7:af:ff:d8:6f:ee:c4:e6:c2:4e:
 ```
 
 ```
-apksigner verify --print-certs bulwark.apk
+apksigner verify --print-certs bulwark-0.1.1.apk
 ```
 
 If that digest does not match, what you downloaded did not come from here.
 
+**The file itself**, for 0.1.1:
+
+```
+SHA-256  b85082c96fd29c05270955911e749680432204390192db940714f6385ba27a27
+```
+
+Note that this one is *per release*, not permanent — the certificate
+fingerprint above is the constant. A signed APK's bytes change on every build,
+because the signature padding is deliberately random, so two builds of
+identical code never produce the same file hash. That is the scheme working,
+not a problem.
+
 **The build is reproducible.** Two checkouts of the same commit produce a
 byte-identical unsigned APK — and so does a build in a completely different
-directory, because nothing about *where* you build leaks into the binary.
-Signed APKs differ only inside the signature block, where the padding is
-deliberately random. So the code in a release can be checked against the source
-instead of taken on faith.
+directory, because nothing about *where* you build leaks into the binary. Only
+the signature block differs. So the code in a release can be checked against
+the source instead of taken on faith:
+
+```
+git checkout v0.1.1
+./gradlew clean assembleRelease
+```
+
+Compare the entries inside that APK against the released one — everything
+except `META-INF` should match exactly. Release builds are always made with a
+clean build, because an incremental one regenerates the baseline profile and
+changes the dex layout without changing a line of code.
 
 **It cannot remove what keeps your phone working.** Telephony, messaging and
 core system components are refused inside the privileged process — below the
