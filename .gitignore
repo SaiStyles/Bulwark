@@ -22,3 +22,13 @@ backup/
 # see keystore.properties.example.
 /keystore.properties
 *.jks
+
+# Documents and the ICM workspace stay local. This repository ships code.
+#
+# Not a tidiness rule - it is the reason the history was rewritten on
+# 2026-09-15, so these must never come back in by accident. A document you
+# genuinely want published has to be added deliberately:
+#
+#     git add -f README.md
+context/
+*.md
