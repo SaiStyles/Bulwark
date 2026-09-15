@@ -42,10 +42,10 @@ enthusiast apps and a wiki:
 
 | The job | What people use today |
 |---|---|
-| Block apps from the internet | NetGuard / RethinkDNS |
-| Kill trackers | TrackerControl |
+| Stop apps phoning home | NetGuard / RethinkDNS / TrackerControl |
 | Remove bloatware without root | Canta / Universal Android Debloater |
 | Lock down permissions for good | scattered, mostly manual |
+| See what apps do in the background | Android's Privacy Dashboard, in part |
 
 Bulwark does all four jobs in one app. Everything in one place, every change
 named, and every change reversible.
